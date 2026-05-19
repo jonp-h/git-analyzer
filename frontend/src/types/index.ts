@@ -16,7 +16,6 @@ export interface ConventionalCommitStats {
 export interface DailyActivity {
   date: string;
   count: number;
-  level: 0 | 1 | 2 | 3 | 4;
 }
 
 export interface WeeklyCommit {

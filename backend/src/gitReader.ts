@@ -114,14 +114,6 @@ function weekKeyToDate(key: string): string {
   return d.toISOString().slice(0, 10);
 }
 
-function activityLevel(count: number): 0 | 1 | 2 | 3 | 4 {
-  if (count === 0) return 0;
-  if (count === 1) return 1;
-  if (count <= 3) return 2;
-  if (count <= 5) return 3;
-  return 4;
-}
-
 export function listRepos(reposDir: string): string[] {
   if (!existsSync(reposDir)) return [];
   return readdirSync(reposDir).filter((name) => {
@@ -248,11 +240,7 @@ export async function getRepoStats(reposDir: string, repoName: string) {
     }
 
     const dailyActivity = Array.from(a.dayCommits.entries()).map(
-      ([date, count]) => ({
-        date,
-        count,
-        level: activityLevel(count),
-      }),
+      ([date, count]) => ({ date, count }),
     );
 
     const weekMap = new Map<string, number>();
