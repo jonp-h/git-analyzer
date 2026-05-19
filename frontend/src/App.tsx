@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import type { RepoStats } from "./types";
 import { RepoDashboard } from "./pages/RepoDashboard";
-import { GitBranch, FolderOpen } from "lucide-react";
+import { GitBranch, FolderOpen, RefreshCw } from "lucide-react";
 
 export default function App() {
   const [repos, setRepos] = useState<string[]>([]);
@@ -9,6 +9,27 @@ export default function App() {
   const [stats, setStats] = useState<RepoStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pullState, setPullState] = useState<
+    Record<string, "idle" | "pulling" | "ok" | "err">
+  >({});
+
+  const pullRepo = async (name: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setPullState((s) => ({ ...s, [name]: "pulling" }));
+    try {
+      const res = await fetch(`/api/repos/${encodeURIComponent(name)}/pull`, {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setPullState((s) => ({ ...s, [name]: "ok" }));
+      // If this repo is currently loaded, refresh its stats
+      if (selectedRepo === name) loadRepo(name);
+    } catch {
+      setPullState((s) => ({ ...s, [name]: "err" }));
+    } finally {
+      setTimeout(() => setPullState((s) => ({ ...s, [name]: "idle" })), 3000);
+    }
+  };
 
   useEffect(() => {
     fetch("/api/repos")
@@ -56,18 +77,42 @@ export default function App() {
             </div>
           ) : (
             repos.map((name) => (
-              <button
+              <div
                 key={name}
-                onClick={() => loadRepo(name)}
-                className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center gap-2 ${
-                  selectedRepo === name
-                    ? "bg-zinc-700 text-zinc-100"
-                    : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                className={`flex items-center gap-1 rounded-md transition-colors ${
+                  selectedRepo === name ? "bg-zinc-700" : "hover:bg-zinc-800"
                 }`}
               >
-                <GitBranch className="w-3.5 h-3.5 flex-shrink-0 opacity-60" />
-                <span className="truncate">{name}</span>
-              </button>
+                <button
+                  onClick={() => loadRepo(name)}
+                  className={`flex-1 text-left px-3 py-2 text-sm flex items-center gap-2 min-w-0 ${
+                    selectedRepo === name
+                      ? "text-zinc-100"
+                      : "text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  <GitBranch className="w-3.5 h-3.5 shrink-0 opacity-60" />
+                  <span className="truncate">{name}</span>
+                </button>
+                <button
+                  onClick={(e) => pullRepo(name, e)}
+                  disabled={pullState[name] === "pulling"}
+                  title={`git pull ${name}`}
+                  className={`mr-1.5 p-1 rounded transition-colors ${
+                    pullState[name] === "ok"
+                      ? "text-green-400"
+                      : pullState[name] === "err"
+                        ? "text-red-400"
+                        : "text-zinc-600 hover:text-zinc-300"
+                  }`}
+                >
+                  <RefreshCw
+                    className={`w-3 h-3 ${
+                      pullState[name] === "pulling" ? "animate-spin" : ""
+                    }`}
+                  />
+                </button>
+              </div>
             ))
           )}
         </nav>
