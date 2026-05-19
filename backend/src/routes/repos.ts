@@ -2,7 +2,7 @@ import { Router } from "express";
 import { join } from "path";
 import { existsSync } from "fs";
 import { simpleGit } from "simple-git";
-import { listRepos, getRepoStats } from "../gitReader.js";
+import { listRepos, getRepoStats, getFileBlame } from "../gitReader.js";
 
 export function reposRouter(reposDir: string) {
   const router = Router();
@@ -18,6 +18,21 @@ export function reposRouter(reposDir: string) {
       res.json(stats);
     } catch (err) {
       console.error("Error reading repo:", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  router.get("/:name/blame", async (req, res) => {
+    const { file } = req.query;
+    if (typeof file !== "string" || !file) {
+      res.status(400).json({ error: "Missing ?file= query parameter" });
+      return;
+    }
+    try {
+      const lines = await getFileBlame(reposDir, req.params.name, file);
+      res.json(lines);
+    } catch (err) {
+      console.error("git blame error:", err);
       res.status(500).json({ error: String(err) });
     }
   });

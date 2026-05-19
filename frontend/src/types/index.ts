@@ -89,6 +89,12 @@ export interface BranchDetail {
   commits: Array<{ date: string; email: string }>;
 }
 
+export interface BlameLine {
+  content: string;
+  authorName: string;
+  authorEmail: string;
+}
+
 export interface DirectMainCommit {
   hash: string;
   authorName: string;

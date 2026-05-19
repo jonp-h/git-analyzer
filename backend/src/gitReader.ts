@@ -663,3 +663,52 @@ export async function getRepoStats(reposDir: string, repoName: string) {
     directMainCommits,
   };
 }
+
+export interface BlameLine {
+  content: string;
+  authorName: string;
+  authorEmail: string;
+}
+
+export async function getFileBlame(
+  reposDir: string,
+  repoName: string,
+  filePath: string,
+): Promise<BlameLine[]> {
+  const repoPath = join(reposDir, repoName);
+
+  // Security: prevent path traversal
+  const normalized = filePath.replace(/\\/g, "/");
+  if (normalized.includes("..") || normalized.startsWith("/")) {
+    throw new Error("Invalid file path");
+  }
+
+  const git = simpleGit(repoPath);
+  const raw = await git.raw(["blame", "--line-porcelain", "--", normalized]);
+
+  const lines = raw.split("\n");
+  const result: BlameLine[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    if (/^[0-9a-f]{40} /.test(lines[i])) {
+      let authorName = "Unknown";
+      let authorEmail = "";
+      i++;
+      while (i < lines.length && !lines[i].startsWith("\t")) {
+        if (lines[i].startsWith("author ") && !lines[i].startsWith("author-")) {
+          authorName = lines[i].slice(7);
+        } else if (lines[i].startsWith("author-mail ")) {
+          authorEmail = lines[i].slice(12).replace(/[<>]/g, "");
+        }
+        i++;
+      }
+      if (i < lines.length && lines[i].startsWith("\t")) {
+        result.push({ content: lines[i].slice(1), authorName, authorEmail });
+      }
+    }
+    i++;
+  }
+
+  return result;
+}

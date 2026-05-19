@@ -1,11 +1,13 @@
 import { useState, useMemo } from "react";
 import type { RepoStats } from "../types";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Search } from "lucide-react";
+import { Search, FileCode } from "lucide-react";
+import { BlameViewer } from "./BlameViewer";
 
 export function FileAttribution({ stats }: { stats: RepoStats }) {
   const [query, setQuery] = useState("");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [blameFile, setBlameFile] = useState<string | null>(null);
 
   const authorByKey = useMemo(
     () => new Map(stats.authors.map((a) => [a.key, a])),
@@ -159,9 +161,14 @@ export function FileAttribution({ stats }: { stats: RepoStats }) {
                     className="w-1.5 h-1.5 rounded-full shrink-0"
                     style={{ backgroundColor: dominantColor }}
                   />
-                  <span className="font-mono text-xs text-zinc-300 truncate">
+                  <button
+                    onClick={() => setBlameFile(file.file)}
+                    className="font-mono text-xs text-zinc-300 truncate hover:text-white flex items-center gap-1 group/fn cursor-pointer"
+                    title="View blame"
+                  >
                     {file.file}
-                  </span>
+                    <FileCode className="w-3 h-3 shrink-0 opacity-0 group-hover/fn:opacity-50 transition-opacity" />
+                  </button>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   {selectedData && selectedColor && (
@@ -248,6 +255,15 @@ export function FileAttribution({ stats }: { stats: RepoStats }) {
           </div>
         )}
       </ScrollArea>
+
+      {blameFile && (
+        <BlameViewer
+          repoName={stats.name}
+          filePath={blameFile}
+          stats={stats}
+          onClose={() => setBlameFile(null)}
+        />
+      )}
     </div>
   );
 }
