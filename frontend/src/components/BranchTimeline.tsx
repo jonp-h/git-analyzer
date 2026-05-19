@@ -71,6 +71,29 @@ export function BranchTimeline({ stats }: { stats: RepoStats }) {
 
   const pct = (d: string) => toPercent(d, minTime, totalMs);
 
+  // Merge commits from allCommits — include deleted-branch merges
+  const mergeMarkers = useMemo(() => {
+    if (!totalMs) return [];
+    return stats.allCommits
+      .filter((c) => c.isMerge)
+      .map((c) => ({
+        pct: toPercent(c.date, minTime, totalMs),
+        message: c.message,
+        date: c.date,
+      }));
+  }, [stats.allCommits, minTime, totalMs]);
+
+  const mergeDateSet = useMemo(
+    () => new Set(mergeMarkers.map((m) => m.date)),
+    [mergeMarkers],
+  );
+
+  const mergeMessageByDate = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of stats.allCommits) if (c.isMerge) map.set(c.date, c.message);
+    return map;
+  }, [stats.allCommits]);
+
   return (
     <div className="space-y-0.5 select-none">
       {/* ── Time axis ── */}
@@ -91,146 +114,194 @@ export function BranchTimeline({ stats }: { stats: RepoStats }) {
       </div>
 
       {/* ── Branch rows ── */}
-      {rows.map((branch) => {
-        const isDefault = branch.isDefault;
-        const forkDate = branch.branchPointDate ?? branch.firstCommit;
-        const forkPct = pct(forkDate);
-        const endPct = pct(branch.lastCommit);
-        const spanWidth = Math.max(endPct - forkPct, 0.25);
-
-        const lineColor = isDefault
-          ? "#3b82f6"
-          : branch.isMerged
-            ? "#22c55e"
-            : "#f59e0b";
-
-        const duration =
-          branch.firstCommit && branch.lastCommit
-            ? differenceInDays(parseISO(branch.lastCommit), parseISO(forkDate))
-            : 0;
-
-        const safeCommits = branch.commits ?? [];
-
-        return (
-          <div
-            key={branch.name}
-            className={`flex items-center gap-2 group ${isDefault ? "mb-3" : ""}`}
-          >
-            {/* Branch label */}
+      <div className="relative">
+        {/* Vertical guides at every merge point — visible even for deleted branches */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{ left: "calc(10rem + 0.5rem)", right: "calc(7rem + 0.5rem)" }}
+        >
+          {mergeMarkers.map((m, i) => (
             <div
-              className={`w-40 shrink-0 text-right text-xs font-mono truncate cursor-default transition-colors ${
-                isDefault
-                  ? "text-blue-400 font-semibold"
-                  : "text-zinc-500 group-hover:text-zinc-200"
-              }`}
-              title={branch.name}
+              key={i}
+              className="absolute inset-y-0 w-px"
+              style={{
+                left: `${m.pct}%`,
+                backgroundColor: "#22c55e",
+                opacity: 0.08,
+              }}
+            />
+          ))}
+        </div>
+
+        {rows.map((branch) => {
+          const isDefault = branch.isDefault;
+          const forkDate = branch.branchPointDate ?? branch.firstCommit;
+          const forkPct = pct(forkDate);
+          const endPct = pct(branch.lastCommit);
+          const spanWidth = Math.max(endPct - forkPct, 0.25);
+
+          const lineColor = isDefault
+            ? "#3b82f6"
+            : branch.isMerged
+              ? "#22c55e"
+              : "#f59e0b";
+
+          const duration =
+            branch.firstCommit && branch.lastCommit
+              ? differenceInDays(
+                  parseISO(branch.lastCommit),
+                  parseISO(forkDate),
+                )
+              : 0;
+
+          const safeCommits = branch.commits ?? [];
+
+          return (
+            <div
+              key={branch.name}
+              className={`flex items-center gap-2 group ${isDefault ? "mb-3" : ""}`}
             >
-              {branch.name}
-            </div>
-
-            {/* ── Swimlane track ── */}
-            <div className="relative flex-1 h-8">
-              {/* faint full-width baseline */}
+              {/* Branch label */}
               <div
-                className="absolute top-1/2 left-0 right-0 h-px -translate-y-1/2"
-                style={{ backgroundColor: "#27272a" }}
-              />
+                className={`w-40 shrink-0 text-right text-xs font-mono truncate cursor-default transition-colors ${
+                  isDefault
+                    ? "text-blue-400 font-semibold"
+                    : "text-zinc-500 group-hover:text-zinc-200"
+                }`}
+                title={branch.name}
+              >
+                {branch.name}
+              </div>
 
-              {/* coloured active-span line */}
-              <div
-                className="absolute top-1/2 -translate-y-1/2 rounded-full"
-                style={{
-                  left: `${forkPct}%`,
-                  width: `${spanWidth}%`,
-                  height: isDefault ? 2 : 1.5,
-                  backgroundColor: lineColor,
-                  opacity: 0.35,
-                }}
-              />
-
-              {/* fork-point tick for feature branches */}
-              {!isDefault && branch.branchPointDate && (
+              {/* ── Swimlane track ── */}
+              <div className="relative flex-1 h-8">
+                {/* faint full-width baseline */}
                 <div
-                  className="absolute top-0 h-full w-px"
+                  className="absolute top-1/2 left-0 right-0 h-px -translate-y-1/2"
+                  style={{ backgroundColor: "#27272a" }}
+                />
+
+                {/* coloured active-span line */}
+                <div
+                  className="absolute top-1/2 -translate-y-1/2 rounded-full"
                   style={{
                     left: `${forkPct}%`,
+                    width: `${spanWidth}%`,
+                    height: isDefault ? 2 : 1.5,
                     backgroundColor: lineColor,
-                    opacity: 0.2,
+                    opacity: 0.35,
                   }}
                 />
-              )}
 
-              {/* ── Commit dots ── */}
-              {safeCommits.map((c, i) => {
-                const x = pct(c.date);
-                const dotColor = emailToColor.get(c.email) ?? "#71717a";
-                const size = isDefault ? 5 : 7;
-                return (
+                {/* fork-point tick for feature branches */}
+                {!isDefault && branch.branchPointDate && (
                   <div
-                    key={i}
-                    className="absolute rounded-full cursor-default"
+                    className="absolute top-0 h-full w-px"
                     style={{
-                      left: `${x}%`,
-                      top: "50%",
-                      width: size,
-                      height: size,
-                      transform: "translate(-50%, -50%)",
-                      backgroundColor: dotColor,
-                      opacity: isDefault ? 0.4 : 0.85,
-                      zIndex: 1,
+                      left: `${forkPct}%`,
+                      backgroundColor: lineColor,
+                      opacity: 0.2,
                     }}
-                    title={`${branch.name} · ${format(parseISO(c.date), "MMM d, yyyy")}`}
                   />
-                );
-              })}
+                )}
 
-              {/* merged check at end of span */}
-              {!isDefault && branch.isMerged && (
-                <div
-                  className="absolute top-1/2 -translate-y-1/2 text-green-500 font-bold leading-none"
-                  style={{
-                    left: `calc(${forkPct + spanWidth}% + 3px)`,
-                    fontSize: 9,
-                  }}
-                >
-                  ✓
-                </div>
-              )}
+                {/* ── Commit dots ── */}
+                {safeCommits.map((c, i) => {
+                  const x = pct(c.date);
+                  const dotColor = emailToColor.get(c.email) ?? "#71717a";
+                  const isMergeDot = isDefault && mergeDateSet.has(c.date);
+                  const size = isDefault ? 5 : 7;
 
-              {/* open branch dot at end */}
-              {!isDefault && !branch.isMerged && (
-                <div
-                  className="absolute top-1/2 -translate-y-1/2 rounded-full border"
-                  style={{
-                    left: `calc(${forkPct + spanWidth}% + 2px)`,
-                    width: 6,
-                    height: 6,
-                    borderColor: "#f59e0b",
-                    backgroundColor: "transparent",
-                  }}
-                />
-              )}
+                  if (isMergeDot) {
+                    return (
+                      <div
+                        key={i}
+                        className="absolute cursor-default"
+                        style={{
+                          left: `${x}%`,
+                          top: "50%",
+                          width: 9,
+                          height: 9,
+                          transform: "translate(-50%, -50%) rotate(45deg)",
+                          backgroundColor: "#22c55e",
+                          opacity: 0.9,
+                          zIndex: 2,
+                        }}
+                        title={
+                          mergeMessageByDate.get(c.date) ??
+                          `Merge · ${format(parseISO(c.date), "MMM d, yyyy")}`
+                        }
+                      />
+                    );
+                  }
+
+                  return (
+                    <div
+                      key={i}
+                      className="absolute rounded-full cursor-default"
+                      style={{
+                        left: `${x}%`,
+                        top: "50%",
+                        width: size,
+                        height: size,
+                        transform: "translate(-50%, -50%)",
+                        backgroundColor: dotColor,
+                        opacity: isDefault ? 0.4 : 0.85,
+                        zIndex: 1,
+                      }}
+                      title={`${branch.name} · ${format(parseISO(c.date), "MMM d, yyyy")}`}
+                    />
+                  );
+                })}
+
+                {/* merged check at end of span */}
+                {!isDefault && branch.isMerged && (
+                  <div
+                    className="absolute top-1/2 -translate-y-1/2 text-green-500 font-bold leading-none"
+                    style={{
+                      left: `calc(${forkPct + spanWidth}% + 3px)`,
+                      fontSize: 9,
+                    }}
+                  >
+                    ✓
+                  </div>
+                )}
+
+                {/* open branch dot at end */}
+                {!isDefault && !branch.isMerged && (
+                  <div
+                    className="absolute top-1/2 -translate-y-1/2 rounded-full border"
+                    style={{
+                      left: `calc(${forkPct + spanWidth}% + 2px)`,
+                      width: 6,
+                      height: 6,
+                      borderColor: "#f59e0b",
+                      backgroundColor: "transparent",
+                    }}
+                  />
+                )}
+              </div>
+
+              {/* Right badge */}
+              <div className="w-28 shrink-0 text-right text-[10px] tabular-nums leading-tight">
+                <span className="text-zinc-500">{branch.commitCount}c</span>
+                {duration > 0 && (
+                  <span className="text-zinc-700 ml-1">
+                    {formatDuration(duration)}
+                  </span>
+                )}
+                {!isDefault && (
+                  <span
+                    className={`ml-1.5 ${branch.isMerged ? "text-green-600" : "text-amber-600"}`}
+                  >
+                    {branch.isMerged ? "merged" : "open"}
+                  </span>
+                )}
+              </div>
             </div>
-
-            {/* Right badge */}
-            <div className="w-28 shrink-0 text-right text-[10px] tabular-nums leading-tight">
-              <span className="text-zinc-500">{branch.commitCount}c</span>
-              {duration > 0 && (
-                <span className="text-zinc-700 ml-1">
-                  {formatDuration(duration)}
-                </span>
-              )}
-              {!isDefault && (
-                <span
-                  className={`ml-1.5 ${branch.isMerged ? "text-green-600" : "text-amber-600"}`}
-                >
-                  {branch.isMerged ? "merged" : "open"}
-                </span>
-              )}
-            </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
 
       {/* ── Legend ── */}
       <div className="flex flex-wrap gap-x-5 gap-y-1 mt-4 ml-40 text-[10px] text-zinc-600">
@@ -249,6 +320,18 @@ export function BranchTimeline({ stats }: { stats: RepoStats }) {
         <span className="flex items-center gap-1.5">
           <span className="inline-block w-px h-3 bg-zinc-500 opacity-30" />
           Fork point
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span
+            className="inline-block shrink-0"
+            style={{
+              width: 7,
+              height: 7,
+              backgroundColor: "#22c55e",
+              transform: "rotate(45deg)",
+            }}
+          />
+          Merge into main
         </span>
       </div>
 
