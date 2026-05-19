@@ -2,7 +2,12 @@ import { Router } from "express";
 import { join } from "path";
 import { existsSync } from "fs";
 import { simpleGit } from "simple-git";
-import { listRepos, getRepoStats, getFileBlame } from "../gitReader.js";
+import {
+  listRepos,
+  getRepoStats,
+  getFileBlame,
+  getCommitDiff,
+} from "../gitReader.js";
 
 export function reposRouter(reposDir: string) {
   const router = Router();
@@ -33,6 +38,21 @@ export function reposRouter(reposDir: string) {
       res.json(lines);
     } catch (err) {
       console.error("git blame error:", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  router.get("/:name/commit/:hash/diff", async (req, res) => {
+    const { hash } = req.params;
+    if (!/^[0-9a-f]{4,64}$/i.test(hash)) {
+      res.status(400).json({ error: "Invalid commit hash" });
+      return;
+    }
+    try {
+      const diff = await getCommitDiff(reposDir, req.params.name, hash);
+      res.json(diff);
+    } catch (err) {
+      console.error("git diff error:", err);
       res.status(500).json({ error: String(err) });
     }
   });

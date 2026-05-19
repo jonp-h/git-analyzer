@@ -670,6 +670,39 @@ export interface BlameLine {
   authorEmail: string;
 }
 
+export async function getCommitDiff(
+  reposDir: string,
+  repoName: string,
+  hash: string,
+): Promise<{ patch: string }> {
+  // Security: only allow valid hex git hash characters
+  if (!/^[0-9a-f]{4,64}$/i.test(hash)) {
+    throw new Error("Invalid commit hash");
+  }
+
+  const repoPath = join(reposDir, repoName);
+  const git = simpleGit(repoPath);
+
+  // Detect whether this is a merge commit so we can choose the right diff strategy.
+  // For merge commits, `git show -p` produces a combined diff that is often empty
+  // (auto-merges have no conflicts) and can be very slow.  Instead, diff against
+  // the first parent, which shows everything that was integrated by the merge.
+  const parentsRaw = await git
+    .raw(["log", "-1", "--format=%P", hash])
+    .catch(() => "");
+  const parents = parentsRaw.trim().split(/\s+/).filter(Boolean);
+
+  let raw: string;
+  if (parents.length >= 2) {
+    // Merge commit: diff against first parent to show the integrated changes
+    raw = await git.raw(["diff", "--no-color", `${hash}^1`, hash]);
+  } else {
+    // Regular commit: standard patch output, no commit header
+    raw = await git.raw(["show", "--no-color", "--format=format:", "-p", hash]);
+  }
+  return { patch: raw.trimStart() };
+}
+
 export async function getFileBlame(
   reposDir: string,
   repoName: string,
