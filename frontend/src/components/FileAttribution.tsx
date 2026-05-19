@@ -61,10 +61,10 @@ export function FileAttribution({ stats }: { stats: RepoStats }) {
 
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-900/40">
-      {/* Top contributors bar chart — click a row to filter */}
+      {/* Users with code majority per file bar chart — click a row to filter */}
       <div className="px-4 pt-4 pb-3 border-b border-zinc-800">
         <div className="flex items-center justify-between text-xs text-zinc-600 mb-2">
-          <span className="text-white">Top contributors</span>
+          <span className="text-white">Users with code majority per file</span>
           <span>{stats.fileAttribution.length} files total</span>
         </div>
         <div className="flex flex-col gap-1.5">

@@ -124,7 +124,9 @@ export function CommitDiffViewer({ repoName, commit, stats, onClose }: Props) {
               {commit.isMerge && (
                 <>
                   <span>·</span>
-                  <span className="text-zinc-600">merge commit</span>
+                  <span className="text-zinc-600">
+                    merge — diff vs first parent
+                  </span>
                 </>
               )}
             </div>
@@ -201,38 +203,40 @@ export function CommitDiffViewer({ repoName, commit, stats, onClose }: Props) {
                     Binary file changed
                   </div>
                 ) : (
-                  file.hunks.map((hunk, hi) => (
-                    <div key={hi} className="font-mono text-xs leading-5">
-                      {/* Hunk header */}
-                      <div className="px-4 py-0.5 bg-blue-950/30 text-blue-500/80 select-none">
-                        {hunk.header}
-                      </div>
-                      {/* Lines */}
-                      {hunk.lines.map((line, li) => (
-                        <div
-                          key={li}
-                          className={
-                            line.type === "+"
-                              ? "bg-green-950/50 text-green-200"
-                              : line.type === "-"
-                                ? "bg-red-950/50 text-red-200"
-                                : "text-zinc-500"
-                          }
-                        >
-                          <span className="inline-block w-5 text-center select-none opacity-50 shrink-0">
-                            {line.type === "+"
-                              ? "+"
-                              : line.type === "-"
-                                ? "−"
-                                : " "}
-                          </span>
-                          <span className="whitespace-pre pl-1">
-                            {line.content || "\u00a0"}
-                          </span>
+                  <div className="w-max min-w-full">
+                    {file.hunks.map((hunk, hi) => (
+                      <div key={hi} className="font-mono text-xs leading-5">
+                        {/* Hunk header */}
+                        <div className="px-4 py-0.5 bg-blue-950/30 text-blue-500/80 select-none">
+                          {hunk.header}
                         </div>
-                      ))}
-                    </div>
-                  ))
+                        {/* Lines */}
+                        {hunk.lines.map((line, li) => (
+                          <div
+                            key={li}
+                            className={
+                              line.type === "+"
+                                ? "bg-green-950/50 text-green-200"
+                                : line.type === "-"
+                                  ? "bg-red-950/50 text-red-200"
+                                  : "text-zinc-500"
+                            }
+                          >
+                            <span className="inline-block w-5 text-center select-none opacity-50 shrink-0">
+                              {line.type === "+"
+                                ? "+"
+                                : line.type === "-"
+                                  ? "−"
+                                  : " "}
+                            </span>
+                            <span className="whitespace-pre pl-1">
+                              {line.content || "\u00a0"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
             );

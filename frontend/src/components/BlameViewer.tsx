@@ -191,7 +191,7 @@ export function BlameViewer({ repoName, filePath, stats, onClose }: Props) {
 
           {/* Lines */}
           {lines && (
-            <div className="inline-block min-w-full font-mono text-xs leading-5">
+            <div className="w-max min-w-full font-mono text-xs leading-5">
               {lines.map((line, i) => {
                 const email = line.authorEmail.toLowerCase();
                 const color = emailToColor.get(email) ?? "#52525b";
@@ -217,7 +217,7 @@ export function BlameViewer({ repoName, filePath, stats, onClose }: Props) {
                       {i + 1}
                     </span>
                     {/* Code — syntax tokens when ready, plain text as fallback */}
-                    <span className="pl-3 pr-8 py-0.5 whitespace-pre">
+                    <span className="pl-3 pr-8 py-0.5 whitespace-pre shrink-0">
                       {tokens ? (
                         (tokens[i] ?? []).map((tok, j) => (
                           <span key={j} style={{ color: tok.color }}>
