@@ -86,6 +86,9 @@ export interface BranchDetail {
   commitCount: number;
   isMerged: boolean;
   isDefault: boolean;
+  mergedAt: string | null;
+  isDeleted?: boolean;
+  parentBranch: string | null;
   commits: Array<{ date: string; email: string }>;
 }
 

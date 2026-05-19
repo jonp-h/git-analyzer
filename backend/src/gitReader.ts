@@ -223,6 +223,9 @@ export async function getRepoStats(reposDir: string, repoName: string) {
     commitCount: number;
     isMerged: boolean;
     isDefault: boolean;
+    mergedAt: string | null;
+    isDeleted?: boolean;
+    parentBranch: string | null;
     commits: Array<{ date: string; email: string }>;
   }> = [];
 
@@ -243,7 +246,62 @@ export async function getRepoStats(reposDir: string, repoName: string) {
     .split("\n")
     .filter(Boolean);
 
-  for (const { name: branch, ref: branchRef } of branchList.slice(0, 25)) {
+  // Fast O(1) lookup for "is this commit on main's first-parent chain?"
+  const defaultFPSet = new Set(defaultFirstParent);
+
+  // Precompute merge events from the default branch once, so every branch
+  // can look up its merge date and we can detect deleted branches.
+  // Map: mergedTipHash → { mergeDate, firstParent, tip, branchNameHint }
+  interface MergeEvent {
+    mergeDate: string;
+    firstParent: string;
+    tip: string;
+    branchNameHint: string | null;
+  }
+  const mergedTipToEvent = new Map<string, MergeEvent>();
+  const mergesRaw = (
+    await git
+      .raw([
+        "log",
+        defaultBranch,
+        "--merges",
+        "--first-parent",
+        "--format=MERGESTART%n%aI%n%P%n%s",
+        "--max-count=2000",
+      ])
+      .catch(() => "")
+  ).trim();
+  for (const block of mergesRaw.split("MERGESTART\n").slice(1)) {
+    const lines = block.split("\n");
+    const mergeDate = lines[0]?.trim();
+    const parentsStr = lines[1]?.trim() ?? "";
+    const subject = lines[2]?.trim() ?? "";
+    if (!mergeDate || !parentsStr) continue;
+    const parents = parentsStr.split(/\s+/).filter(Boolean);
+
+    let branchNameHint: string | null = null;
+    const m1 = subject.match(/Merge branch '([^']+)'/);
+    const m2 = subject.match(/Merge pull request #\d+ from [^/]+\/(.+)/);
+    const m3 = subject.match(/Merge remote-tracking branch 'origin\/([^']+)'/);
+    const m4 = subject.match(/Merge branch "([^"]+)"/);
+    if (m1) branchNameHint = m1[1];
+    else if (m2) branchNameHint = m2[1].trim();
+    else if (m3) branchNameHint = m3[1];
+    else if (m4) branchNameHint = m4[1];
+
+    // parents[0] = first parent (main's side), parents[1..] = branch tips
+    for (const tipHash of parents.slice(1)) {
+      if (tipHash)
+        mergedTipToEvent.set(tipHash, {
+          mergeDate,
+          firstParent: parents[0],
+          tip: tipHash,
+          branchNameHint,
+        });
+    }
+  }
+
+  for (const { name: branch, ref: branchRef } of branchList) {
     try {
       if (branch === defaultBranch) {
         // Default branch: show full project timeline
@@ -264,10 +322,19 @@ export async function getRepoStats(reposDir: string, repoName: string) {
           commitCount: defDates.length,
           isMerged: false,
           isDefault: true,
+          mergedAt: null,
+          parentBranch: null,
           commits: defCommits,
         });
       } else {
         // Feature branch: find where it diverged from the default branch.
+        // Resolve tip hash up-front so we can look up the merge event.
+        const tip = (
+          await git.raw(["rev-parse", branchRef]).catch(() => "")
+        ).trim();
+        const mergeEvent = tip ? mergedTipToEvent.get(tip) : undefined;
+        const mergedAt = mergeEvent?.mergeDate ?? null;
+
         let mergeBase = (
           await git
             .raw(["merge-base", "--fork-point", defaultBranch, branchRef])
@@ -280,6 +347,12 @@ export async function getRepoStats(reposDir: string, repoName: string) {
               .catch(() => "")
           ).trim();
         }
+
+        // Which branch was this forked from?
+        // If the merge-base is on main's first-parent chain → directly from main.
+        // Otherwise it's still main-derived but via a non-linear path.
+        // Orphan branches (no merge-base) have no parent.
+        const parentBranch: string | null = mergeBase ? defaultBranch : null;
 
         if (mergeBase) {
           let branchPointDate =
@@ -297,91 +370,61 @@ export async function getRepoStats(reposDir: string, repoName: string) {
                   "log",
                   `${mergeBase}..${branchRef}`,
                   "--format=%aI\t%ae",
-                  "--max-count=500",
+                  "--max-count=2000",
                 ])
                 .catch(() => "")
             ).trim(),
           );
 
-          // Fallback when mergeBase..branchRef is empty.
-          // This happens when the branch tip is already an ancestor of the
-          // default branch (i.e. the branch was merged).  Two strategies:
-          //   1. FF-merge: the tip sits directly on main's first-parent chain.
-          //   2. Regular merge: a merge commit in main has the tip as its
-          //      second (or later) parent.  Use that commit's first parent as
-          //      the real fork base so we get all branch-unique commits.
-          if (!branchCommits.length) {
-            const tip = (
-              await git.raw(["rev-parse", branchRef]).catch(() => "")
-            ).trim();
-            if (tip) {
-              // Strategy 1 – FF merge
-              const idx = defaultFirstParent.indexOf(tip);
-              if (idx >= 0 && idx + 1 < defaultFirstParent.length) {
-                const realFork = defaultFirstParent[idx + 1];
-                branchPointDate =
-                  (
-                    await git
-                      .raw(["log", "-1", "--format=%aI", realFork])
-                      .catch(() => "")
-                  ).trim() || branchPointDate;
-                branchCommits = parseCommitLines(
-                  (
-                    await git
-                      .raw([
-                        "log",
-                        `${realFork}..${branchRef}`,
-                        "--format=%aI\t%ae",
-                        "--max-count=500",
-                      ])
-                      .catch(() => "")
-                  ).trim(),
-                );
-              }
-
-              // Strategy 2 – regular (non-FF) merge: search main's merge
-              // commits for one whose parents include the branch tip.
-              if (!branchCommits.length) {
-                const mergesLog = (
+          // Fallback when mergeBase..branchRef is empty (branch already merged).
+          // Strategy 1 – FF-merge: tip sits directly on main's first-parent chain.
+          // Strategy 2 – regular merge: use precomputed merge event map.
+          if (!branchCommits.length && tip) {
+            // Strategy 1
+            const idx = defaultFirstParent.indexOf(tip);
+            if (idx >= 0 && idx + 1 < defaultFirstParent.length) {
+              const realFork = defaultFirstParent[idx + 1];
+              branchPointDate =
+                (
+                  await git
+                    .raw(["log", "-1", "--format=%aI", realFork])
+                    .catch(() => "")
+                ).trim() || branchPointDate;
+              branchCommits = parseCommitLines(
+                (
                   await git
                     .raw([
                       "log",
-                      defaultBranch,
-                      "--merges",
-                      "--format=%H %P",
-                      "--max-count=1000",
+                      `${realFork}..${branchRef}`,
+                      "--format=%aI\t%ae",
+                      "--max-count=2000",
                     ])
                     .catch(() => "")
-                ).trim();
-                for (const line of mergesLog.split("\n").filter(Boolean)) {
-                  const parts = line.trim().split(/\s+/);
-                  if (parts.length < 3) continue; // need at least hash + 2 parents
-                  const parents = parts.slice(1);
-                  if (parents.includes(tip)) {
-                    // parents[0] is the first parent (main's side before merge)
-                    const forkBase = parents[0];
-                    branchPointDate =
-                      (
-                        await git
-                          .raw(["log", "-1", "--format=%aI", forkBase])
-                          .catch(() => "")
-                      ).trim() || branchPointDate;
-                    branchCommits = parseCommitLines(
-                      (
-                        await git
-                          .raw([
-                            "log",
-                            `${forkBase}..${branchRef}`,
-                            "--format=%aI\t%ae",
-                            "--max-count=500",
-                          ])
-                          .catch(() => "")
-                      ).trim(),
-                    );
-                    if (branchCommits.length) break;
-                  }
-                }
-              }
+                ).trim(),
+              );
+            }
+
+            // Strategy 2 – use precomputed merge event (avoids extra git log)
+            if (!branchCommits.length && mergeEvent) {
+              const forkBase = mergeEvent.firstParent;
+              branchPointDate =
+                (
+                  await git
+                    .raw(["log", "-1", "--format=%aI", forkBase])
+                    .catch(() => "")
+                ).trim() || branchPointDate;
+              branchCommits = parseCommitLines(
+                (
+                  await git
+                    .raw([
+                      "log",
+                      `${forkBase}..${branchRef}`,
+                      "--format=%aI\t%ae",
+                      "--max-count=2000",
+                    ])
+                    .catch(() => "")
+                ).trim(),
+              );
             }
           }
 
@@ -398,6 +441,8 @@ export async function getRepoStats(reposDir: string, repoName: string) {
             commitCount: dates.length,
             isMerged: mergedSet.has(branch),
             isDefault: false,
+            mergedAt,
+            parentBranch,
             commits: branchCommits,
           });
         } else {
@@ -405,7 +450,12 @@ export async function getRepoStats(reposDir: string, repoName: string) {
           const branchCommits = parseCommitLines(
             (
               await git
-                .raw(["log", branchRef, "--format=%aI\t%ae", "--max-count=500"])
+                .raw([
+                  "log",
+                  branchRef,
+                  "--format=%aI\t%ae",
+                  "--max-count=2000",
+                ])
                 .catch(() => "")
             ).trim(),
           );
@@ -419,12 +469,63 @@ export async function getRepoStats(reposDir: string, repoName: string) {
             commitCount: dates.length,
             isMerged: mergedSet.has(branch),
             isDefault: false,
+            mergedAt,
+            parentBranch: null,
             commits: branchCommits,
           });
         }
       }
     } catch {
       /* skip branch */
+    }
+  }
+
+  // Ghost branches: deleted branches identified from merge commit messages.
+  // These existed at merge time but no longer appear in git branch -a.
+  const existingBranchNames = new Set(branchDetails.map((b) => b.name));
+  const ghostsAdded = new Set<string>();
+  for (const [tipHash, event] of mergedTipToEvent) {
+    const name = event.branchNameHint;
+    if (!name || name === defaultBranch) continue;
+    if (existingBranchNames.has(name) || ghostsAdded.has(name)) continue;
+    ghostsAdded.add(name);
+    try {
+      const { firstParent, mergeDate } = event;
+      const branchPointDate =
+        (
+          await git
+            .raw(["log", "-1", "--format=%aI", firstParent])
+            .catch(() => "")
+        ).trim() || null;
+      const ghostCommits = parseCommitLines(
+        (
+          await git
+            .raw([
+              "log",
+              `${firstParent}..${tipHash}`,
+              "--format=%aI\t%ae",
+              "--max-count=200",
+            ])
+            .catch(() => "")
+        ).trim(),
+      );
+      if (!ghostCommits.length && !branchPointDate) continue;
+      const dates = ghostCommits.map((c) => c.date);
+      branchDetails.push({
+        name,
+        branchPointDate,
+        firstCommit: dates.length ? dates[dates.length - 1] : branchPointDate!,
+        lastCommit: dates.length ? dates[0] : branchPointDate!,
+        commitCount: dates.length,
+        isMerged: true,
+        isDefault: false,
+        mergedAt: mergeDate,
+        isDeleted: true,
+        parentBranch: defaultBranch,
+        commits: ghostCommits,
+      });
+    } catch {
+      /* skip ghost */
     }
   }
 
