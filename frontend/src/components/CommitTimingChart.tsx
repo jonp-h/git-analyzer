@@ -60,7 +60,7 @@ export function CommitTimingChart({ stats }: { stats: RepoStats }) {
     }
 
     return Array.from({ length: 24 }, (_, h) => ({
-      hour: `${String(h).padStart(2, "0")}h`,
+      hour: `${String(h)}:00`,
       ...grid[h],
     }));
   }, [stats]);
