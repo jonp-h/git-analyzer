@@ -7,6 +7,9 @@ import { ActivityHeatmap } from "../components/ActivityHeatmap";
 import { CommitSizeChart } from "../components/CommitSizeChart";
 import { ConventionalCommitsChart } from "../components/ConventionalCommitsChart";
 import { FileAttribution } from "../components/FileAttribution";
+import { BranchTimeline } from "../components/BranchTimeline";
+import { CommitTimingChart } from "../components/CommitTimingChart";
+import { DirectCommitsPanel } from "../components/DirectCommitsPanel";
 import { GitBranch, GitMerge, Calendar, Users, Hash } from "lucide-react";
 import { format, parseISO } from "date-fns";
 
@@ -134,10 +137,34 @@ export function RepoDashboard({ stats }: { stats: RepoStats }) {
           </div>
         </section>
 
+        {/* Branch timeline */}
+        {stats.branchDetails.length > 0 && (
+          <section>
+            <SectionHeading>Branch Activity</SectionHeading>
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+              <BranchTimeline stats={stats} />
+            </div>
+          </section>
+        )}
+
+        {/* Direct commits to main */}
+        <section>
+          <SectionHeading>Direct Commits to Main</SectionHeading>
+          <DirectCommitsPanel stats={stats} />
+        </section>
+
         {/* Commit timeline */}
         <section>
           <SectionHeading>Commit Timeline</SectionHeading>
           <CommitTimeline stats={stats} />
+        </section>
+
+        {/* Work patterns */}
+        <section>
+          <SectionHeading>Work Patterns</SectionHeading>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+            <CommitTimingChart stats={stats} />
+          </div>
         </section>
 
         {/* File attribution */}

@@ -54,6 +54,7 @@ export interface CommitInfo {
   deletions: number;
   totalLines: number;
   size: "tiny" | "small" | "medium" | "large" | "dump";
+  isMerge: boolean;
   isConventional: boolean;
   conventionalType: string | null;
 }
@@ -77,9 +78,29 @@ export interface WeeklyDataPoint {
   [key: string]: number | string;
 }
 
+export interface BranchDetail {
+  name: string;
+  branchPointDate: string | null;
+  firstCommit: string;
+  lastCommit: string;
+  commitCount: number;
+  isMerged: boolean;
+  isDefault: boolean;
+  commits: Array<{ date: string; email: string }>;
+}
+
+export interface DirectMainCommit {
+  hash: string;
+  authorName: string;
+  authorEmail: string;
+  date: string;
+  message: string;
+}
+
 export interface RepoStats {
   name: string;
   branches: string[];
+  branchDetails: BranchDetail[];
   mergeCount: number;
   firstCommit: string;
   lastCommit: string;
@@ -90,4 +111,5 @@ export interface RepoStats {
   allCommits: CommitInfo[];
   weeklyActivity: WeeklyDataPoint[];
   fileAttribution: FileAttribution[];
+  directMainCommits: DirectMainCommit[];
 }

@@ -24,6 +24,7 @@ interface RawCommit {
   authorEmail: string;
   date: string;
   message: string;
+  isMerge: boolean;
   insertions: number;
   deletions: number;
   files: Array<{ path: string; insertions: number; deletions: number }>;
@@ -40,6 +41,8 @@ function parseGitLog(raw: string): RawCommit[] {
     const authorEmail = lines[2]?.trim();
     const date = lines[3]?.trim();
     const message = lines[4]?.trim();
+    const parents = lines[5]?.trim() ?? "";
+    const isMerge = parents.split(" ").filter(Boolean).length >= 2;
 
     if (!hash || !authorEmail) continue;
 
@@ -47,8 +50,8 @@ function parseGitLog(raw: string): RawCommit[] {
     let deletions = 0;
     const files: RawCommit["files"] = [];
 
-    // numstat starts at line 6 (line 5 is blank separator)
-    for (let i = 6; i < lines.length; i++) {
+    // numstat starts at line 7 (line 5 = parents, line 6 = blank separator)
+    for (let i = 7; i < lines.length; i++) {
       const line = lines[i].trim();
       if (!line) continue;
       const parts = line.split("\t");
@@ -78,6 +81,7 @@ function parseGitLog(raw: string): RawCommit[] {
       authorEmail,
       date,
       message,
+      isMerge,
       insertions,
       deletions,
       files,
@@ -114,6 +118,25 @@ function weekKeyToDate(key: string): string {
   return d.toISOString().slice(0, 10);
 }
 
+function parseCommitLines(raw: string): Array<{ date: string; email: string }> {
+  return raw
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const tab = line.indexOf("\t");
+      if (tab < 0) return { date: line.trim(), email: "" };
+      return {
+        date: line.slice(0, tab).trim(),
+        email: line
+          .slice(tab + 1)
+          .trim()
+          .toLowerCase(),
+      };
+    })
+    .filter((c) => c.date);
+}
+
 export function listRepos(reposDir: string): string[] {
   if (!existsSync(reposDir)) return [];
   return readdirSync(reposDir).filter((name) => {
@@ -133,7 +156,7 @@ export async function getRepoStats(reposDir: string, repoName: string) {
   const rawLog = await git.raw([
     "log",
     "--all",
-    `--format=${BOUNDARY}%n%H%n%an%n%ae%n%aI%n%s`,
+    `--format=${BOUNDARY}%n%H%n%an%n%ae%n%aI%n%s%n%P`,
     "--numstat",
   ]);
 
@@ -141,19 +164,269 @@ export async function getRepoStats(reposDir: string, repoName: string) {
 
   // Branches
   const branchData = await git.branch(["-a"]);
-  const branches = [
-    ...new Set(
-      Object.values(branchData.branches)
-        .filter((b) => !b.name.includes("HEAD"))
-        .map((b) => b.name.replace(/^remotes\/origin\//, "")),
-    ),
-  ];
 
-  // Merge count
-  const mergeRaw = await git.raw(["log", "--all", "--merges", "--format=%H"]);
-  const mergeCount = mergeRaw.trim()
-    ? mergeRaw.trim().split("\n").filter(Boolean).length
-    : 0;
+  // Build branch list preserving the actual git ref so remote-only branches
+  // (no local checkout) can still be queried with `git log <ref>`.
+  // Prefer local refs; add remote-only branches in a second pass.
+  const seenSimpleNames = new Set<string>();
+  const branchList: Array<{ name: string; ref: string }> = [];
+  for (const b of Object.values(branchData.branches)) {
+    if (b.name.includes("HEAD") || b.name.startsWith("remotes/")) continue;
+    if (!seenSimpleNames.has(b.name)) {
+      seenSimpleNames.add(b.name);
+      branchList.push({ name: b.name, ref: b.name });
+    }
+  }
+  for (const b of Object.values(branchData.branches)) {
+    if (b.name.includes("HEAD") || !b.name.startsWith("remotes/")) continue;
+    const simpleName = b.name.replace(/^remotes\/origin\//, "");
+    if (!seenSimpleNames.has(simpleName)) {
+      seenSimpleNames.add(simpleName);
+      branchList.push({ name: simpleName, ref: b.name }); // use full remote ref
+    }
+  }
+  const branches = branchList.map((b) => b.name);
+
+  // Merge count (derived from parsed commits)
+  const mergeCount = commits.filter((c) => c.isMerge).length;
+
+  // Branch details (for Gantt timeline)
+  let defaultBranch = branches[0] ?? "main";
+  try {
+    defaultBranch = (await git.raw(["symbolic-ref", "--short", "HEAD"])).trim();
+  } catch {
+    /* detached HEAD */
+  }
+
+  const mergedBranchesRaw = await git
+    .raw(["branch", "--merged", "HEAD"])
+    .catch(() => "");
+  const mergedRemoteRaw = await git
+    .raw(["branch", "-r", "--merged", "HEAD"])
+    .catch(() => "");
+  const mergedSet = new Set([
+    ...mergedBranchesRaw
+      .split("\n")
+      .map((b) => b.trim().replace(/^\*\s*/, ""))
+      .filter(Boolean),
+    ...mergedRemoteRaw
+      .split("\n")
+      .map((b) => b.trim().replace(/^origin\//, ""))
+      .filter(Boolean),
+  ]);
+
+  const branchDetails: Array<{
+    name: string;
+    branchPointDate: string | null;
+    firstCommit: string;
+    lastCommit: string;
+    commitCount: number;
+    isMerged: boolean;
+    isDefault: boolean;
+    commits: Array<{ date: string; email: string }>;
+  }> = [];
+
+  // Pre-cache default-branch first-parent list so FF-merge detection
+  // doesn't re-run the same expensive git log for every branch.
+  const defaultFirstParent = (
+    await git
+      .raw([
+        "log",
+        defaultBranch,
+        "--first-parent",
+        "--format=%H",
+        "--max-count=2000",
+      ])
+      .catch(() => "")
+  )
+    .trim()
+    .split("\n")
+    .filter(Boolean);
+
+  for (const { name: branch, ref: branchRef } of branchList.slice(0, 25)) {
+    try {
+      if (branch === defaultBranch) {
+        // Default branch: show full project timeline
+        const defCommits = parseCommitLines(
+          (
+            await git
+              .raw(["log", branchRef, "--format=%aI\t%ae", "--max-count=1000"])
+              .catch(() => "")
+          ).trim(),
+        );
+        if (!defCommits.length) continue;
+        const defDates = defCommits.map((c) => c.date);
+        branchDetails.push({
+          name: branch,
+          branchPointDate: null,
+          firstCommit: defDates[defDates.length - 1],
+          lastCommit: defDates[0],
+          commitCount: defDates.length,
+          isMerged: false,
+          isDefault: true,
+          commits: defCommits,
+        });
+      } else {
+        // Feature branch: find where it diverged from the default branch.
+        let mergeBase = (
+          await git
+            .raw(["merge-base", "--fork-point", defaultBranch, branchRef])
+            .catch(() => "")
+        ).trim();
+        if (!mergeBase) {
+          mergeBase = (
+            await git
+              .raw(["merge-base", defaultBranch, branchRef])
+              .catch(() => "")
+          ).trim();
+        }
+
+        if (mergeBase) {
+          let branchPointDate =
+            (
+              await git
+                .raw(["log", "-1", "--format=%aI", mergeBase])
+                .catch(() => "")
+            ).trim() || null;
+
+          // Commits unique to this branch (date + email for dot colouring)
+          let branchCommits = parseCommitLines(
+            (
+              await git
+                .raw([
+                  "log",
+                  `${mergeBase}..${branchRef}`,
+                  "--format=%aI\t%ae",
+                  "--max-count=500",
+                ])
+                .catch(() => "")
+            ).trim(),
+          );
+
+          // Fallback when mergeBase..branchRef is empty.
+          // This happens when the branch tip is already an ancestor of the
+          // default branch (i.e. the branch was merged).  Two strategies:
+          //   1. FF-merge: the tip sits directly on main's first-parent chain.
+          //   2. Regular merge: a merge commit in main has the tip as its
+          //      second (or later) parent.  Use that commit's first parent as
+          //      the real fork base so we get all branch-unique commits.
+          if (!branchCommits.length) {
+            const tip = (
+              await git.raw(["rev-parse", branchRef]).catch(() => "")
+            ).trim();
+            if (tip) {
+              // Strategy 1 – FF merge
+              const idx = defaultFirstParent.indexOf(tip);
+              if (idx >= 0 && idx + 1 < defaultFirstParent.length) {
+                const realFork = defaultFirstParent[idx + 1];
+                branchPointDate =
+                  (
+                    await git
+                      .raw(["log", "-1", "--format=%aI", realFork])
+                      .catch(() => "")
+                  ).trim() || branchPointDate;
+                branchCommits = parseCommitLines(
+                  (
+                    await git
+                      .raw([
+                        "log",
+                        `${realFork}..${branchRef}`,
+                        "--format=%aI\t%ae",
+                        "--max-count=500",
+                      ])
+                      .catch(() => "")
+                  ).trim(),
+                );
+              }
+
+              // Strategy 2 – regular (non-FF) merge: search main's merge
+              // commits for one whose parents include the branch tip.
+              if (!branchCommits.length) {
+                const mergesLog = (
+                  await git
+                    .raw([
+                      "log",
+                      defaultBranch,
+                      "--merges",
+                      "--format=%H %P",
+                      "--max-count=1000",
+                    ])
+                    .catch(() => "")
+                ).trim();
+                for (const line of mergesLog.split("\n").filter(Boolean)) {
+                  const parts = line.trim().split(/\s+/);
+                  if (parts.length < 3) continue; // need at least hash + 2 parents
+                  const parents = parts.slice(1);
+                  if (parents.includes(tip)) {
+                    // parents[0] is the first parent (main's side before merge)
+                    const forkBase = parents[0];
+                    branchPointDate =
+                      (
+                        await git
+                          .raw(["log", "-1", "--format=%aI", forkBase])
+                          .catch(() => "")
+                      ).trim() || branchPointDate;
+                    branchCommits = parseCommitLines(
+                      (
+                        await git
+                          .raw([
+                            "log",
+                            `${forkBase}..${branchRef}`,
+                            "--format=%aI\t%ae",
+                            "--max-count=500",
+                          ])
+                          .catch(() => "")
+                      ).trim(),
+                    );
+                    if (branchCommits.length) break;
+                  }
+                }
+              }
+            }
+          }
+
+          const dates = branchCommits.map((c) => c.date);
+          if (!dates.length && !branchPointDate) continue;
+
+          branchDetails.push({
+            name: branch,
+            branchPointDate,
+            firstCommit: dates.length
+              ? dates[dates.length - 1]
+              : branchPointDate!,
+            lastCommit: dates.length ? dates[0] : branchPointDate!,
+            commitCount: dates.length,
+            isMerged: mergedSet.has(branch),
+            isDefault: false,
+            commits: branchCommits,
+          });
+        } else {
+          // No common ancestor (orphan branch) — full history fallback
+          const branchCommits = parseCommitLines(
+            (
+              await git
+                .raw(["log", branchRef, "--format=%aI\t%ae", "--max-count=500"])
+                .catch(() => "")
+            ).trim(),
+          );
+          if (!branchCommits.length) continue;
+          const dates = branchCommits.map((c) => c.date);
+          branchDetails.push({
+            name: branch,
+            branchPointDate: null,
+            firstCommit: dates[dates.length - 1],
+            lastCommit: dates[0],
+            commitCount: dates.length,
+            isMerged: mergedSet.has(branch),
+            isDefault: false,
+            commits: branchCommits,
+          });
+        }
+      }
+    } catch {
+      /* skip branch */
+    }
+  }
 
   // Build per-author data keyed by lowercase email
   type AuthorEntry = {
@@ -342,10 +615,25 @@ export async function getRepoStats(reposDir: string, repoName: string) {
         deletions: c.deletions,
         totalLines,
         size: sizeLabel(totalLines),
+        isMerge: c.isMerge,
         isConventional: CONVENTIONAL_RE.test(c.message),
         conventionalType: m ? m[1].toLowerCase() : null,
       };
     });
+
+  // Direct (non-merge) commits on the default branch's first-parent chain.
+  // Reuses the already-computed defaultFirstParent and commits arrays.
+  const commitByHash = new Map(commits.map((c) => [c.hash, c]));
+  const directMainCommits = defaultFirstParent
+    .map((hash) => commitByHash.get(hash))
+    .filter((c): c is RawCommit => !!c && !c.isMerge)
+    .map((c) => ({
+      hash: c.hash,
+      authorName: c.authorName,
+      authorEmail: c.authorEmail.toLowerCase(),
+      date: c.date,
+      message: c.message,
+    }));
 
   const sortedAll = [...commits].sort((a, b) => a.date.localeCompare(b.date));
   const firstCommit = sortedAll[0]?.date ?? "";
@@ -361,6 +649,7 @@ export async function getRepoStats(reposDir: string, repoName: string) {
   return {
     name: repoName,
     branches,
+    branchDetails,
     mergeCount,
     firstCommit,
     lastCommit,
@@ -371,5 +660,6 @@ export async function getRepoStats(reposDir: string, repoName: string) {
     allCommits,
     weeklyActivity,
     fileAttribution,
+    directMainCommits,
   };
 }

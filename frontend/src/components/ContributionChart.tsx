@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import type { ReactNode } from "react";
 import type { RepoStats } from "../types";
 import {
   AreaChart,
@@ -12,9 +13,16 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
+  ReferenceLine,
   ResponsiveContainer,
 } from "recharts";
-import { format, parseISO, addDays, getISOWeek } from "date-fns";
+import {
+  format,
+  parseISO,
+  addDays,
+  getISOWeek,
+  startOfISOWeek,
+} from "date-fns";
 
 function weekLabel(dateStr: string): string {
   const start = parseISO(dateStr);
@@ -61,7 +69,6 @@ const TOOLTIP_STYLE = {
     fontSize: "12px",
   },
   labelStyle: { color: "#a1a1aa", marginBottom: "4px" },
-  labelFormatter: (label: string) => weekLabel(label),
 };
 
 const AXIS_TICK = { fill: "#71717a", fontSize: 11 };
@@ -72,9 +79,11 @@ export function ContributionChart({ stats }: { stats: RepoStats }) {
   const nameOf = (key: string) =>
     stats.authors.find((a) => a.key === key)?.name ?? key;
 
-  const tooltipFormatter = (value: number | string, key: string) => [
-    value,
-    nameOf(String(key)),
+  // Recharts Formatter generics are overly strict — cast to avoid false errors
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tooltipFormatter: any = (value: unknown, key: unknown) => [
+    value as ReactNode,
+    nameOf(String(key ?? "")),
   ];
 
   const legendFormatter = (value: string) => {
@@ -110,6 +119,16 @@ export function ContributionChart({ stats }: { stats: RepoStats }) {
       }
       return point;
     });
+  }, [stats]);
+
+  const mergeWeeks = useMemo(() => {
+    const seen = new Set<string>();
+    for (const c of stats.allCommits) {
+      if (c.isMerge) {
+        seen.add(format(startOfISOWeek(parseISO(c.date)), "yyyy-MM-dd"));
+      }
+    }
+    return [...seen];
   }, [stats]);
 
   const activeTitle = VIEWS.find((v) => v.key === view)?.title ?? "";
@@ -165,8 +184,21 @@ export function ContributionChart({ stats }: { stats: RepoStats }) {
             {sharedAxisProps.grid}
             {sharedAxisProps.xAxis}
             {sharedAxisProps.yAxis}
-            <Tooltip {...TOOLTIP_STYLE} formatter={tooltipFormatter} />
+            <Tooltip
+              {...TOOLTIP_STYLE}
+              labelFormatter={(l) => weekLabel(String(l ?? ""))}
+              formatter={tooltipFormatter}
+            />
             <Legend formatter={legendFormatter} />
+            {mergeWeeks.map((week) => (
+              <ReferenceLine
+                key={`m-${week}`}
+                x={week}
+                stroke="#6366f1"
+                strokeDasharray="3 3"
+                strokeOpacity={0.4}
+              />
+            ))}
             {stats.authors.map((a) => (
               <Area
                 key={a.key}
@@ -194,8 +226,21 @@ export function ContributionChart({ stats }: { stats: RepoStats }) {
             {sharedAxisProps.grid}
             {sharedAxisProps.xAxis}
             {sharedAxisProps.yAxis}
-            <Tooltip {...TOOLTIP_STYLE} formatter={tooltipFormatter} />
+            <Tooltip
+              {...TOOLTIP_STYLE}
+              labelFormatter={(l) => weekLabel(String(l ?? ""))}
+              formatter={tooltipFormatter}
+            />
             <Legend formatter={legendFormatter} />
+            {mergeWeeks.map((week) => (
+              <ReferenceLine
+                key={`m-${week}`}
+                x={week}
+                stroke="#6366f1"
+                strokeDasharray="3 3"
+                strokeOpacity={0.4}
+              />
+            ))}
             {stats.authors.map((a) => (
               <Bar
                 key={a.key}
@@ -220,8 +265,21 @@ export function ContributionChart({ stats }: { stats: RepoStats }) {
             {sharedAxisProps.grid}
             {sharedAxisProps.xAxis}
             {sharedAxisProps.yAxis}
-            <Tooltip {...TOOLTIP_STYLE} formatter={tooltipFormatter} />
+            <Tooltip
+              {...TOOLTIP_STYLE}
+              labelFormatter={(l) => weekLabel(String(l ?? ""))}
+              formatter={tooltipFormatter}
+            />
             <Legend formatter={legendFormatter} />
+            {mergeWeeks.map((week) => (
+              <ReferenceLine
+                key={`m-${week}`}
+                x={week}
+                stroke="#6366f1"
+                strokeDasharray="3 3"
+                strokeOpacity={0.4}
+              />
+            ))}
             {stats.authors.map((a) => (
               <Line
                 key={a.key}
@@ -247,8 +305,21 @@ export function ContributionChart({ stats }: { stats: RepoStats }) {
             {sharedAxisProps.grid}
             {sharedAxisProps.xAxis}
             {sharedAxisProps.yAxis}
-            <Tooltip {...TOOLTIP_STYLE} formatter={tooltipFormatter} />
+            <Tooltip
+              {...TOOLTIP_STYLE}
+              labelFormatter={(l) => weekLabel(String(l ?? ""))}
+              formatter={tooltipFormatter}
+            />
             <Legend formatter={legendFormatter} />
+            {mergeWeeks.map((week) => (
+              <ReferenceLine
+                key={`m-${week}`}
+                x={week}
+                stroke="#6366f1"
+                strokeDasharray="3 3"
+                strokeOpacity={0.4}
+              />
+            ))}
             {stats.authors.map((a) => (
               <Line
                 key={a.key}
