@@ -8,6 +8,11 @@ import {
   getFileBlame,
   getCommitDiff,
 } from "../gitReader.js";
+import {
+  getGitHubRemote,
+  fetchGitHubData,
+  type GitHubDataResponse,
+} from "../github.js";
 
 export function reposRouter(reposDir: string) {
   const router = Router();
@@ -54,6 +59,55 @@ export function reposRouter(reposDir: string) {
     } catch (err) {
       console.error("git diff error:", err);
       res.status(500).json({ error: String(err) });
+    }
+  });
+
+  router.get("/:name/github-data", async (req, res) => {
+    const repoPath = join(reposDir, req.params.name);
+    if (!existsSync(repoPath)) {
+      res
+        .status(404)
+        .json({
+          error: "Repo not found",
+        } satisfies Partial<GitHubDataResponse>);
+      return;
+    }
+    if (!process.env.GITHUB_TOKEN) {
+      res.json({
+        prs: [],
+        issues: [],
+        remote: null,
+        error: "GITHUB_TOKEN not configured",
+      } satisfies GitHubDataResponse);
+      return;
+    }
+    const remote = await getGitHubRemote(repoPath);
+    if (!remote) {
+      res.json({
+        prs: [],
+        issues: [],
+        remote: null,
+        error: "Not a GitHub-hosted repo",
+      } satisfies GitHubDataResponse);
+      return;
+    }
+    try {
+      const { prs, issues } = await fetchGitHubData(remote.owner, remote.repo);
+      res.json({
+        prs,
+        issues,
+        owner: remote.owner,
+        repo: remote.repo,
+        remote: remote.url,
+      } satisfies GitHubDataResponse);
+    } catch (err) {
+      console.error("GitHub API error:", err);
+      res.json({
+        prs: [],
+        issues: [],
+        remote: remote.url,
+        error: String(err),
+      } satisfies GitHubDataResponse);
     }
   });
 

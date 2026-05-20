@@ -129,3 +129,73 @@ export interface FilterState {
   authorMode: "exclude" | "include";
   selectedAuthors: string[]; // author keys (lowercase email)
 }
+
+// ---------------------------------------------------------------------------
+// GitHub PR & Review types
+// ---------------------------------------------------------------------------
+
+export interface PRReview {
+  reviewer: string;
+  state: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED";
+  submittedAt: string;
+}
+
+export interface PRDetail {
+  number: number;
+  title: string;
+  state: "open" | "closed" | "merged";
+  author: string;
+  authorAvatarUrl: string;
+  draft: boolean;
+  createdAt: string;
+  closedAt: string | null;
+  mergedAt: string | null;
+  headBranch: string;
+  baseBranch: string;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  reviews: PRReview[];
+  mergedWithoutReview: boolean;
+  timeToFirstReviewSeconds: number | null;
+  comments: number;
+  reviewComments: number;
+}
+
+export interface PRsResponse {
+  prs: PRDetail[];
+  owner?: string;
+  repo?: string;
+  remote: string | null;
+  error?: string;
+}
+
+// ---------------------------------------------------------------------------
+// GitHub Issues types
+// ---------------------------------------------------------------------------
+
+export interface IssueLabel {
+  name: string;
+  color: string;
+}
+
+export interface IssueDetail {
+  number: number;
+  title: string;
+  state: "open" | "closed";
+  author: string;
+  assignees: string[];
+  labels: IssueLabel[];
+  createdAt: string;
+  closedAt: string | null;
+  comments: number;
+}
+
+export interface GitHubDataResponse {
+  prs: PRDetail[];
+  issues: IssueDetail[];
+  owner?: string;
+  repo?: string;
+  remote: string | null;
+  error?: string;
+}

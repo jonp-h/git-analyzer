@@ -1,5 +1,10 @@
-import { useState, useMemo } from "react";
-import type { RepoStats, AuthorStats, FilterState } from "../types";
+import { useState, useMemo, useEffect } from "react";
+import type {
+  RepoStats,
+  AuthorStats,
+  FilterState,
+  GitHubDataResponse,
+} from "../types";
 import { AuthorCard } from "../components/AuthorCard";
 import { CommitTimeline } from "../components/CommitTimeline";
 import { ContributionChart } from "../components/ContributionChart";
@@ -11,6 +16,10 @@ import { BranchTimeline } from "../components/BranchTimeline";
 import { CommitTimingChart } from "../components/CommitTimingChart";
 import { DirectCommitsPanel } from "../components/DirectCommitsPanel";
 import { FilterBar } from "../components/FilterBar";
+import { PRReviewPanel } from "../components/PRReviewPanel";
+import { ReviewStats } from "../components/ReviewStats";
+import { IssuePanel } from "../components/IssuePanel";
+import { IssueVelocityChart } from "../components/IssueVelocityChart";
 import { applyFilters } from "../lib/filterStats";
 import { GitBranch, GitMerge, Calendar, Users, Hash } from "lucide-react";
 import { format, parseISO } from "date-fns";
@@ -103,6 +112,22 @@ export function RepoDashboard({ stats }: { stats: RepoStats }) {
   const [filterState, setFilterState] = useState<FilterState>(() =>
     loadFilter(stats.name),
   );
+  const [ghData, setGhData] = useState<GitHubDataResponse | null>(null);
+
+  useEffect(() => {
+    setGhData(null);
+    fetch(`/api/repos/${encodeURIComponent(stats.name)}/github-data`)
+      .then((r) => r.json() as Promise<GitHubDataResponse>)
+      .then(setGhData)
+      .catch(() =>
+        setGhData({
+          prs: [],
+          issues: [],
+          remote: null,
+          error: "Failed to fetch GitHub data",
+        }),
+      );
+  }, [stats.name]);
 
   const handleFilterChange = (f: FilterState) => {
     setFilterState(f);
@@ -235,6 +260,54 @@ export function RepoDashboard({ stats }: { stats: RepoStats }) {
           <section>
             <SectionHeading>File Attribution</SectionHeading>
             <FileAttribution stats={filteredStats} />
+          </section>
+        )}
+
+        {/* Pull requests */}
+        <section>
+          <SectionHeading>Pull Requests</SectionHeading>
+          {ghData === null ? (
+            <p className="text-sm text-zinc-500">Loading…</p>
+          ) : ghData.error === "GITHUB_TOKEN not configured" ? (
+            <p className="text-sm text-zinc-500">
+              Add <code className="text-zinc-400">GITHUB_TOKEN</code> to{" "}
+              <code className="text-zinc-400">backend/.env</code> to enable PR
+              &amp; issue data.
+            </p>
+          ) : ghData.error ? (
+            <p className="text-sm text-amber-500">{ghData.error}</p>
+          ) : (
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+              <PRReviewPanel prs={ghData.prs} />
+            </div>
+          )}
+        </section>
+
+        {/* Review activity */}
+        {ghData && !ghData.error && ghData.prs.length > 0 && (
+          <section>
+            <SectionHeading>Review Activity</SectionHeading>
+            <ReviewStats prs={ghData.prs} />
+          </section>
+        )}
+
+        {/* Issues */}
+        {ghData && !ghData.error && (
+          <section>
+            <SectionHeading>Issues</SectionHeading>
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+              <IssuePanel issues={ghData.issues} />
+            </div>
+          </section>
+        )}
+
+        {/* Issue velocity */}
+        {ghData && !ghData.error && ghData.issues.length > 0 && (
+          <section>
+            <SectionHeading>Issue Velocity</SectionHeading>
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+              <IssueVelocityChart issues={ghData.issues} />
+            </div>
           </section>
         )}
       </div>
