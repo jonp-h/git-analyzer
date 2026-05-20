@@ -203,10 +203,15 @@ export async function fetchGitHubData(
   // GitHub issues endpoint includes PRs — exclude them
   const rawIssues = rawAll.filter((i) => !i.pull_request);
 
-  // Fetch reviews in batches of 5 (concurrency cap)
+  // Fetch reviews + PR detail (for additions/deletions) in batches of 5
   const prs = await inBatches(rawPRs, 5, async (pr) => {
     const number = pr.number as number;
-    const reviews = await fetchReviews(owner, repo, number, token);
+    const [reviews, detail] = await Promise.all([
+      fetchReviews(owner, repo, number, token),
+      ghFetch(`/repos/${owner}/${repo}/pulls/${number}`, token) as Promise<
+        Record<string, unknown>
+      >,
+    ]);
 
     const isMerged = !!pr.merged_at;
     const state: PRDetail["state"] = isMerged
@@ -245,14 +250,14 @@ export async function fetchGitHubData(
       mergedAt: (pr.merged_at as string | null) ?? null,
       headBranch: ((pr.head as Record<string, unknown>)?.ref as string) ?? "",
       baseBranch: ((pr.base as Record<string, unknown>)?.ref as string) ?? "",
-      additions: (pr.additions as number) ?? 0,
-      deletions: (pr.deletions as number) ?? 0,
-      changedFiles: (pr.changed_files as number) ?? 0,
+      additions: (detail.additions as number) ?? 0,
+      deletions: (detail.deletions as number) ?? 0,
+      changedFiles: (detail.changed_files as number) ?? 0,
       reviews,
       mergedWithoutReview: isMerged && !approvedBeforeMerge,
       timeToFirstReviewSeconds,
-      comments: (pr.comments as number) ?? 0,
-      reviewComments: (pr.review_comments as number) ?? 0,
+      comments: (detail.comments as number) ?? 0,
+      reviewComments: (detail.review_comments as number) ?? 0,
     } satisfies PRDetail;
   });
 

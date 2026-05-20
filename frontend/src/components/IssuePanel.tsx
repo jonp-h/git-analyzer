@@ -133,6 +133,7 @@ export function IssuePanel({ issues }: { issues: IssueDetail[] }) {
         <table className="w-full text-sm border-separate border-spacing-0">
           <thead>
             <tr className="text-xs text-zinc-500 border-b border-zinc-800">
+              <th className="pb-2 w-1" />
               <th className="pb-2 pr-3 text-left font-medium">
                 <SortBtn
                   col="number"
@@ -194,11 +195,20 @@ export function IssuePanel({ issues }: { issues: IssueDetail[] }) {
           <tbody>
             {sorted.map((issue) => {
               const noAssignee = issue.assignees.length === 0;
+              const isClosed = issue.state === "closed";
               return (
                 <tr
                   key={issue.number}
-                  className={`border-b border-zinc-800/60 ${noAssignee && issue.state === "open" ? "bg-amber-500/5" : ""}`}
+                  className={`border-b border-zinc-800/60 ${
+                    noAssignee && !isClosed ? "bg-amber-500/5" : ""
+                  } ${isClosed ? "opacity-60" : ""}`}
                 >
+                  {/* State strip */}
+                  <td
+                    className={`p-0 w-1 ${
+                      isClosed ? "bg-purple-500/40" : "bg-green-500/50"
+                    }`}
+                  />
                   {/* # */}
                   <td className="py-2 pr-3 text-zinc-400 font-mono">
                     {issue.number}
