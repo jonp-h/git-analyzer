@@ -57,6 +57,7 @@ export interface CommitInfo {
   isMerge: boolean;
   isConventional: boolean;
   conventionalType: string | null;
+  coAuthors: Array<{ name: string; email: string }>;
 }
 
 export interface FileAuthorAttribution {

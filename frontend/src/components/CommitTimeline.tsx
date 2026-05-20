@@ -38,6 +38,12 @@ function CommitRow({
   const author = stats.authors.find((a) => a.key === commit.authorKey);
   const color = author?.color ?? "#52525b";
   const date = format(parseISO(commit.date), "MMM d, HH:mm");
+  const coAuthorDetails = commit.coAuthors.map((ca) => {
+    const found = stats.authors.find(
+      (a) => a.email.toLowerCase() === ca.email.toLowerCase(),
+    );
+    return { name: ca.name, color: found?.color ?? "#71717a" };
+  });
 
   return (
     <button
@@ -70,6 +76,12 @@ function CommitRow({
         </div>
         <div className="flex items-center gap-2 mt-1 text-xs text-zinc-500 flex-wrap">
           <span style={{ color }}>{commit.authorName}</span>
+          {coAuthorDetails.map((ca, i) => (
+            <span key={i} className="flex items-center gap-1">
+              <span className="text-zinc-600">+</span>
+              <span style={{ color: ca.color }}>{ca.name}</span>
+            </span>
+          ))}
           <span>·</span>
           <span>{date}</span>
           <span>·</span>
@@ -105,8 +117,17 @@ export function CommitTimeline({ stats }: { stats: RepoStats }) {
 
   const filtered = useMemo(() => {
     if (selectedKeys.size === 0) return stats.allCommits;
-    return stats.allCommits.filter((c) => selectedKeys.has(c.authorKey));
-  }, [stats.allCommits, selectedKeys]);
+    const emailToKey = new Map(
+      stats.authors.map((a) => [a.email.toLowerCase(), a.key]),
+    );
+    return stats.allCommits.filter(
+      (c) =>
+        selectedKeys.has(c.authorKey) ||
+        c.coAuthors.some((ca) =>
+          selectedKeys.has(emailToKey.get(ca.email.toLowerCase()) ?? ""),
+        ),
+    );
+  }, [stats.allCommits, selectedKeys, stats.authors]);
 
   return (
     <>

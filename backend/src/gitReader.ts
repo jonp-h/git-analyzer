@@ -17,6 +17,7 @@ const CONVENTIONAL_TYPE_RE =
   /^(feat|fix|docs|style|refactor|test|chore|build|ci|perf|revert)/i;
 
 const BOUNDARY = "COMMITBOUNDARY";
+const CO_AUTHOR_RE = /^Co-authored-by:\s*(.+?)\s*<([^>]+)>\s*$/i;
 
 interface RawCommit {
   hash: string;
@@ -28,6 +29,7 @@ interface RawCommit {
   insertions: number;
   deletions: number;
   files: Array<{ path: string; insertions: number; deletions: number }>;
+  coAuthors: Array<{ name: string; email: string }>;
 }
 
 function parseGitLog(raw: string): RawCommit[] {
@@ -49,11 +51,23 @@ function parseGitLog(raw: string): RawCommit[] {
     let insertions = 0;
     let deletions = 0;
     const files: RawCommit["files"] = [];
+    const coAuthors: RawCommit["coAuthors"] = [];
 
-    // numstat starts at line 7 (line 5 = parents, line 6 = blank separator)
-    for (let i = 7; i < lines.length; i++) {
+    // Scan all remaining lines: co-author trailers from %b, then numstat lines.
+    // Body length is variable so we detect line type by content instead of index.
+    for (let i = 6; i < lines.length; i++) {
       const line = lines[i].trim();
       if (!line) continue;
+
+      const coMatch = CO_AUTHOR_RE.exec(line);
+      if (coMatch) {
+        coAuthors.push({
+          name: coMatch[1].trim(),
+          email: coMatch[2].trim().toLowerCase(),
+        });
+        continue;
+      }
+
       const parts = line.split("\t");
       if (parts.length !== 3) continue;
       if (parts[0] === "-" || parts[1] === "-") continue; // binary file
@@ -85,6 +99,7 @@ function parseGitLog(raw: string): RawCommit[] {
       insertions,
       deletions,
       files,
+      coAuthors,
     });
   }
 
@@ -156,7 +171,7 @@ export async function getRepoStats(reposDir: string, repoName: string) {
   const rawLog = await git.raw([
     "log",
     "--all",
-    `--format=${BOUNDARY}%n%H%n%an%n%ae%n%aI%n%s%n%P`,
+    `--format=${BOUNDARY}%n%H%n%an%n%ae%n%aI%n%s%n%P%n%b`,
     "--numstat",
   ]);
 
@@ -594,6 +609,49 @@ export async function getRepoStats(reposDir: string, repoName: string) {
         a.ccTypes[t] = (a.ccTypes[t] || 0) + 1;
       }
     }
+
+    // Credit co-authors with the same stats (full credit — mirrors GitHub's model)
+    for (const co of c.coAuthors) {
+      const coKey = co.email.toLowerCase();
+      if (!authorMap.has(coKey)) {
+        const idx = colorIdx++;
+        authorMap.set(coKey, {
+          name: co.name,
+          email: co.email,
+          colorIndex: idx,
+          key: `a${idx}`,
+          totalCommits: 0,
+          linesAdded: 0,
+          linesDeleted: 0,
+          filesTouched: new Set(),
+          dayCommits: new Map(),
+          commits: [],
+          sizeBuckets: { tiny: 0, small: 0, medium: 0, large: 0, dump: 0 },
+          ccTotal: 0,
+          ccConforming: 0,
+          ccTypes: {},
+        });
+      }
+      const ca = authorMap.get(coKey)!;
+      ca.totalCommits++;
+      ca.linesAdded += c.insertions;
+      ca.linesDeleted += c.deletions;
+      for (const f of c.files) ca.filesTouched.add(f.path);
+      const coDay = c.date.slice(0, 10);
+      ca.dayCommits.set(coDay, (ca.dayCommits.get(coDay) || 0) + 1);
+      ca.commits.push(c);
+      const coSize = sizeLabel(c.insertions + c.deletions);
+      ca.sizeBuckets[coSize]++;
+      ca.ccTotal++;
+      if (CONVENTIONAL_RE.test(c.message)) {
+        ca.ccConforming++;
+        const cm = CONVENTIONAL_TYPE_RE.exec(c.message);
+        if (cm) {
+          const ct = cm[1].toLowerCase();
+          ca.ccTypes[ct] = (ca.ccTypes[ct] || 0) + 1;
+        }
+      }
+    }
   }
 
   // Serialize authors (ordered by most commits desc)
@@ -719,6 +777,7 @@ export async function getRepoStats(reposDir: string, repoName: string) {
         isMerge: c.isMerge,
         isConventional: CONVENTIONAL_RE.test(c.message),
         conventionalType: m ? m[1].toLowerCase() : null,
+        coAuthors: c.coAuthors,
       };
     });
 
