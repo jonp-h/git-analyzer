@@ -225,6 +225,14 @@ export function RepoDashboard({ stats }: { stats: RepoStats }) {
           </div>
         </section>
 
+        {/* File attribution */}
+        {filteredStats.fileAttribution.length > 0 && (
+          <section>
+            <SectionHeading>File Attribution</SectionHeading>
+            <FileAttribution stats={filteredStats} />
+          </section>
+        )}
+
         {/* Branch timeline */}
         {filteredStats.branchDetails.length > 0 && (
           <section>
@@ -235,31 +243,11 @@ export function RepoDashboard({ stats }: { stats: RepoStats }) {
           </section>
         )}
 
-        {/* Direct commits to main */}
-        <section>
-          <SectionHeading>Direct Commits to Main</SectionHeading>
-          <DirectCommitsPanel stats={filteredStats} />
-        </section>
-
-        {/* Commit timeline */}
-        <section>
-          <SectionHeading>Commit Timeline</SectionHeading>
-          <CommitTimeline stats={filteredStats} />
-        </section>
-
-        {/* Work patterns */}
-        <section>
-          <SectionHeading>Work Patterns</SectionHeading>
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
-            <CommitTimingChart stats={filteredStats} />
-          </div>
-        </section>
-
-        {/* File attribution */}
-        {filteredStats.fileAttribution.length > 0 && (
+        {/* Review activity */}
+        {ghData && !ghData.error && ghData.prs.length > 0 && (
           <section>
-            <SectionHeading>File Attribution</SectionHeading>
-            <FileAttribution stats={filteredStats} />
+            <SectionHeading>Review Activity</SectionHeading>
+            <ReviewStats prs={ghData.prs} />
           </section>
         )}
 
@@ -283,11 +271,13 @@ export function RepoDashboard({ stats }: { stats: RepoStats }) {
           )}
         </section>
 
-        {/* Review activity */}
-        {ghData && !ghData.error && ghData.prs.length > 0 && (
+        {/* Issue velocity */}
+        {ghData && !ghData.error && ghData.issues.length > 0 && (
           <section>
-            <SectionHeading>Review Activity</SectionHeading>
-            <ReviewStats prs={ghData.prs} />
+            <SectionHeading>Issue Velocity</SectionHeading>
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+              <IssueVelocityChart issues={ghData.issues} />
+            </div>
           </section>
         )}
 
@@ -301,15 +291,25 @@ export function RepoDashboard({ stats }: { stats: RepoStats }) {
           </section>
         )}
 
-        {/* Issue velocity */}
-        {ghData && !ghData.error && ghData.issues.length > 0 && (
-          <section>
-            <SectionHeading>Issue Velocity</SectionHeading>
-            <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
-              <IssueVelocityChart issues={ghData.issues} />
-            </div>
-          </section>
-        )}
+        {/* Direct commits to main */}
+        <section>
+          <SectionHeading>Direct Commits to Main</SectionHeading>
+          <DirectCommitsPanel stats={filteredStats} />
+        </section>
+
+        {/* Work patterns */}
+        <section>
+          <SectionHeading>Work Patterns</SectionHeading>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+            <CommitTimingChart stats={filteredStats} />
+          </div>
+        </section>
+
+        {/* Commit timeline */}
+        <section>
+          <SectionHeading>Commit Timeline</SectionHeading>
+          <CommitTimeline stats={filteredStats} />
+        </section>
       </div>
     </div>
   );
