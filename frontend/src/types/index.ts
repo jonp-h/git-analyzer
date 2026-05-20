@@ -122,3 +122,10 @@ export interface RepoStats {
   fileAttribution: FileAttribution[];
   directMainCommits: DirectMainCommit[];
 }
+
+export interface FilterState {
+  dateFrom: string | null; // "YYYY-MM-DD"
+  dateTo: string | null; // "YYYY-MM-DD"
+  authorMode: "exclude" | "include";
+  selectedAuthors: string[]; // author keys (lowercase email)
+}

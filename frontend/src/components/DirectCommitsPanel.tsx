@@ -1,10 +1,22 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { format, parseISO } from "date-fns";
 import type { RepoStats } from "../types";
 
 export function DirectCommitsPanel({ stats }: { stats: RepoStats }) {
   const { directMainCommits, authors, totalCommits } = stats;
   const [highlighted, setHighlighted] = useState<string | null>(null);
+
+  // Clear highlight if the highlighted author is no longer in the filtered set.
+  useEffect(() => {
+    if (
+      highlighted !== null &&
+      !directMainCommits.some(
+        (c) => c.authorEmail.toLowerCase() === highlighted,
+      )
+    ) {
+      setHighlighted(null);
+    }
+  }, [directMainCommits, highlighted]);
 
   const emailToAuthor = useMemo(() => {
     const map = new Map<string, { name: string; color: string }>();

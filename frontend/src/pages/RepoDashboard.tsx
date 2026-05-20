@@ -1,5 +1,5 @@
-import { useState } from "react";
-import type { RepoStats, AuthorStats } from "../types";
+import { useState, useMemo } from "react";
+import type { RepoStats, AuthorStats, FilterState } from "../types";
 import { AuthorCard } from "../components/AuthorCard";
 import { CommitTimeline } from "../components/CommitTimeline";
 import { ContributionChart } from "../components/ContributionChart";
@@ -10,8 +10,35 @@ import { FileAttribution } from "../components/FileAttribution";
 import { BranchTimeline } from "../components/BranchTimeline";
 import { CommitTimingChart } from "../components/CommitTimingChart";
 import { DirectCommitsPanel } from "../components/DirectCommitsPanel";
+import { FilterBar } from "../components/FilterBar";
+import { applyFilters } from "../lib/filterStats";
 import { GitBranch, GitMerge, Calendar, Users, Hash } from "lucide-react";
 import { format, parseISO } from "date-fns";
+
+const DEFAULT_FILTER: FilterState = {
+  dateFrom: null,
+  dateTo: null,
+  authorMode: "exclude",
+  selectedAuthors: [],
+};
+
+function loadFilter(repoName: string): FilterState {
+  try {
+    const raw = localStorage.getItem(`git-analyzer:filters:${repoName}`);
+    if (raw) return { ...DEFAULT_FILTER, ...JSON.parse(raw) };
+  } catch {
+    // ignore
+  }
+  return DEFAULT_FILTER;
+}
+
+function saveFilter(repoName: string, f: FilterState) {
+  try {
+    localStorage.setItem(`git-analyzer:filters:${repoName}`, JSON.stringify(f));
+  } catch {
+    // ignore
+  }
+}
 
 function StatPill({
   icon: Icon,
@@ -28,7 +55,13 @@ function StatPill({
   );
 }
 
-function RepoHeader({ stats }: { stats: RepoStats }) {
+function RepoHeader({
+  stats,
+  children,
+}: {
+  stats: RepoStats;
+  children?: React.ReactNode;
+}) {
   const first = stats.firstCommit
     ? format(parseISO(stats.firstCommit), "MMM d, yyyy")
     : "—";
@@ -52,6 +85,7 @@ function RepoHeader({ stats }: { stats: RepoStats }) {
         <StatPill icon={Users} label={`${stats.contributors} contributors`} />
         <StatPill icon={Hash} label={`${stats.totalCommits} commits`} />
       </div>
+      {children}
     </div>
   );
 }
@@ -66,23 +100,47 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
 
 export function RepoDashboard({ stats }: { stats: RepoStats }) {
   const [selectedEmail, setSelectedEmail] = useState<string | null>(null);
+  const [filterState, setFilterState] = useState<FilterState>(() =>
+    loadFilter(stats.name),
+  );
 
+  const handleFilterChange = (f: FilterState) => {
+    setFilterState(f);
+    saveFilter(stats.name, f);
+  };
+
+  const filteredStats = useMemo(
+    () => applyFilters(stats, filterState),
+    [stats, filterState],
+  );
+
+  const isDateFiltered = !!(filterState.dateFrom || filterState.dateTo);
+
+  // If the selected author got filtered out, deselect them.
   const selectedAuthor: AuthorStats | null =
-    stats.authors.find((a) => a.email === selectedEmail) ?? null;
+    filteredStats.authors.find((a) => a.email === selectedEmail) ?? null;
 
   const toggle = (email: string) =>
     setSelectedEmail((prev) => (prev === email ? null : email));
 
   return (
     <div className="flex flex-col min-h-full">
-      <RepoHeader stats={stats} />
+      <RepoHeader stats={filteredStats}>
+        <FilterBar
+          authors={stats.authors}
+          filterState={filterState}
+          onChange={handleFilterChange}
+          totalCommits={stats.totalCommits}
+          filteredCommits={filteredStats.totalCommits}
+        />
+      </RepoHeader>
 
-      <div className="p-6 space-y-8 max-w-[1600px]">
+      <div className="p-6 space-y-8 max-w-400">
         {/* Contributors */}
         <section>
           <SectionHeading>Contributors</SectionHeading>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
-            {stats.authors.map((author) => (
+            {filteredStats.authors.map((author) => (
               <AuthorCard
                 key={author.email}
                 author={author}
@@ -98,7 +156,7 @@ export function RepoDashboard({ stats }: { stats: RepoStats }) {
           <section className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
             <div className="flex items-center gap-2 mb-5">
               <div
-                className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                className="w-2.5 h-2.5 rounded-full shrink-0"
                 style={{ backgroundColor: selectedAuthor.color }}
               />
               <span className="font-semibold text-zinc-100">
@@ -107,6 +165,11 @@ export function RepoDashboard({ stats }: { stats: RepoStats }) {
               <span className="text-zinc-600 text-sm">
                 {selectedAuthor.email}
               </span>
+              {isDateFiltered && (
+                <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] bg-zinc-800 text-zinc-500 border border-zinc-700">
+                  Summary stats are all-time
+                </span>
+              )}
             </div>
             <div className="space-y-6">
               <div>
@@ -133,16 +196,16 @@ export function RepoDashboard({ stats }: { stats: RepoStats }) {
         <section>
           <SectionHeading>Lines Added Over Time</SectionHeading>
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
-            <ContributionChart stats={stats} />
+            <ContributionChart stats={filteredStats} />
           </div>
         </section>
 
         {/* Branch timeline */}
-        {stats.branchDetails.length > 0 && (
+        {filteredStats.branchDetails.length > 0 && (
           <section>
             <SectionHeading>Branch Activity</SectionHeading>
             <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
-              <BranchTimeline stats={stats} />
+              <BranchTimeline stats={filteredStats} />
             </div>
           </section>
         )}
@@ -150,28 +213,28 @@ export function RepoDashboard({ stats }: { stats: RepoStats }) {
         {/* Direct commits to main */}
         <section>
           <SectionHeading>Direct Commits to Main</SectionHeading>
-          <DirectCommitsPanel stats={stats} />
+          <DirectCommitsPanel stats={filteredStats} />
         </section>
 
         {/* Commit timeline */}
         <section>
           <SectionHeading>Commit Timeline</SectionHeading>
-          <CommitTimeline stats={stats} />
+          <CommitTimeline stats={filteredStats} />
         </section>
 
         {/* Work patterns */}
         <section>
           <SectionHeading>Work Patterns</SectionHeading>
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
-            <CommitTimingChart stats={stats} />
+            <CommitTimingChart stats={filteredStats} />
           </div>
         </section>
 
         {/* File attribution */}
-        {stats.fileAttribution.length > 0 && (
+        {filteredStats.fileAttribution.length > 0 && (
           <section>
             <SectionHeading>File Attribution</SectionHeading>
-            <FileAttribution stats={stats} />
+            <FileAttribution stats={filteredStats} />
           </section>
         )}
       </div>
