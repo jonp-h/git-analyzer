@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { format, parseISO, differenceInDays } from "date-fns";
-import type { RepoStats, BranchDetail } from "../types";
+import type { RepoStats, BranchDetail, PRDetail } from "../types";
 
 // ── Layout constants (px) ───────────────────────────────────────────────────
 const MAIN_H = 52;
@@ -25,12 +25,24 @@ function fmtDuration(days: number): string {
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
-export function BranchTimeline({ stats }: { stats: RepoStats }) {
+export function BranchTimeline({
+  stats,
+  prs = [],
+}: {
+  stats: RepoStats;
+  prs?: PRDetail[];
+}) {
   const emailToColor = useMemo(() => {
     const m = new Map<string, string>();
     for (const a of stats.authors) m.set(a.email.toLowerCase(), a.color);
     return m;
   }, [stats.authors]);
+
+  const prByBranch = useMemo(() => {
+    const m = new Map<string, PRDetail>();
+    for (const pr of prs) m.set(pr.headBranch, pr);
+    return m;
+  }, [prs]);
 
   const { minTime, totalMs, mainBranch, featureBranches, monthTicks } =
     useMemo(() => {
@@ -94,8 +106,15 @@ export function BranchTimeline({ stats }: { stats: RepoStats }) {
     b.mergedAt ? pct(b.mergedAt) : pct(b.lastCommit);
 
   // colour per branch status
-  const branchColor = (b: BranchDetail) =>
-    b.isDeleted ? "#a855f7" : b.isMerged ? "#22c55e" : "#f59e0b";
+  const branchColor = (b: BranchDetail) => {
+    if (b.isDeleted) return "#a855f7";
+    if (b.isMerged) {
+      const pr = prByBranch.get(b.name);
+      if (pr?.mergedWithoutReview) return "#f97316";
+      return "#22c55e";
+    }
+    return "#f59e0b";
+  };
 
   return (
     <div className="select-none space-y-2">
@@ -135,21 +154,35 @@ export function BranchTimeline({ stats }: { stats: RepoStats }) {
           )}
           {featureBranches.map((b, n) => {
             const top = MAIN_H + ROW_GAP + n * (ROW_H + ROW_GAP);
+            const pr = prByBranch.get(b.name);
             const color = b.isDeleted
               ? "text-purple-400"
               : b.isMerged
-                ? "text-green-400"
+                ? pr?.mergedWithoutReview
+                  ? "text-orange-400"
+                  : "text-green-400"
                 : "text-amber-400";
             return (
               <div
                 key={b.name}
-                className="absolute inset-x-0 pr-2 flex items-center justify-end"
+                className="absolute inset-x-0 pr-2 flex items-center justify-end gap-1"
                 style={{ top, height: ROW_H }}
               >
+                {pr && (
+                  <span className="text-[9px] font-mono text-zinc-600 shrink-0">
+                    #{pr.number}
+                  </span>
+                )}
                 <span
                   className={`text-[11px] font-mono truncate ${color}`}
                   style={{ opacity: b.isDeleted ? 0.7 : 1 }}
-                  title={b.isDeleted ? `${b.name} (deleted)` : b.name}
+                  title={
+                    pr
+                      ? `#${pr.number}: ${pr.title}`
+                      : b.isDeleted
+                        ? `${b.name} (deleted)`
+                        : b.name
+                  }
                 >
                   {b.name}
                 </span>
@@ -223,6 +256,7 @@ export function BranchTimeline({ stats }: { stats: RepoStats }) {
               : b.isMerged
                 ? endX
                 : null;
+            const pr = prByBranch.get(b.name);
 
             return (
               <div key={b.name}>
@@ -287,7 +321,11 @@ export function BranchTimeline({ stats }: { stats: RepoStats }) {
                 {/* Merge diamond on main */}
                 {mergeX !== null && (
                   <div
-                    title={`${b.name}${b.isDeleted ? " (deleted)" : ""} merged${b.mergedAt ? " · " + fmtDate(b.mergedAt) : ""}`}
+                    title={`${
+                      pr ? `#${pr.number}: ${pr.title} · ` : b.name
+                    }${b.isDeleted ? " (deleted)" : ""} merged${
+                      b.mergedAt ? " · " + fmtDate(b.mergedAt) : ""
+                    }`}
                     style={{
                       position: "absolute",
                       left: `${mergeX}%`,
@@ -412,6 +450,7 @@ export function BranchTimeline({ stats }: { stats: RepoStats }) {
           {/* Feature branch badges */}
           {featureBranches.map((b, n) => {
             const top = MAIN_H + ROW_GAP + n * (ROW_H + ROW_GAP);
+            const pr = prByBranch.get(b.name);
             const start = b.branchPointDate ?? b.firstCommit;
             const end2 = b.mergedAt ?? b.lastCommit;
             const days =
@@ -426,6 +465,11 @@ export function BranchTimeline({ stats }: { stats: RepoStats }) {
                 style={{ top, height: ROW_H }}
               >
                 <div className="flex items-center gap-1.5 flex-wrap">
+                  {pr && (
+                    <span className="text-[9px] font-mono text-zinc-600">
+                      #{pr.number}
+                    </span>
+                  )}
                   <span className="text-[11px] text-zinc-400 tabular-nums">
                     {b.commitCount}c
                   </span>
@@ -435,9 +479,15 @@ export function BranchTimeline({ stats }: { stats: RepoStats }) {
                     </span>
                   )}
                   {b.isMerged ? (
-                    <span className="text-[10px] font-medium text-green-500 bg-green-950/60 px-1.5 py-0.5 rounded-full border border-green-900/60">
-                      {b.isDeleted ? "merged · deleted" : "merged"}
-                    </span>
+                    pr?.mergedWithoutReview ? (
+                      <span className="text-[10px] font-medium text-orange-400 bg-orange-950/60 px-1.5 py-0.5 rounded-full border border-orange-900/60">
+                        {b.isDeleted ? "merged · deleted" : "merged"}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-medium text-green-500 bg-green-950/60 px-1.5 py-0.5 rounded-full border border-green-900/60">
+                        {b.isDeleted ? "merged · deleted" : "merged"}
+                      </span>
+                    )
                   ) : (
                     <span className="text-[10px] font-medium text-amber-500 bg-amber-950/60 px-1.5 py-0.5 rounded-full border border-amber-900/60">
                       open
@@ -447,6 +497,21 @@ export function BranchTimeline({ stats }: { stats: RepoStats }) {
                 {b.mergedAt && (
                   <span className="text-[10px] text-zinc-600">
                     ↳ {fmtDate(b.mergedAt)}
+                    {pr && (
+                      <span
+                        className={
+                          pr.mergedWithoutReview
+                            ? " text-orange-500"
+                            : " text-green-600"
+                        }
+                      >
+                        {pr.mergedWithoutReview
+                          ? " · ⚠ no review"
+                          : ` · ✓ ${pr.reviews.filter((r) => r.state === "APPROVED").length} approved`}
+                        {pr.comments + pr.reviewComments > 0 &&
+                          ` · 💬 ${pr.comments + pr.reviewComments}`}
+                      </span>
+                    )}
                   </span>
                 )}
                 {b.branchPointDate && b.parentBranch && (
@@ -474,7 +539,14 @@ export function BranchTimeline({ stats }: { stats: RepoStats }) {
             className="inline-block w-4 rounded-full"
             style={{ height: 2, backgroundColor: "#22c55e", opacity: 0.85 }}
           />
-          Merged
+          Merged (reviewed)
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span
+            className="inline-block w-4 rounded-full"
+            style={{ height: 2, backgroundColor: "#f97316", opacity: 0.85 }}
+          />
+          Merged w/o review
         </span>
         <span className="flex items-center gap-1.5">
           <span

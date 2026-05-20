@@ -230,7 +230,7 @@ export function RepoDashboard({ stats }: { stats: RepoStats }) {
           <section>
             <SectionHeading>Branch Activity</SectionHeading>
             <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
-              <BranchTimeline stats={filteredStats} />
+              <BranchTimeline stats={filteredStats} prs={ghData?.prs} />
             </div>
           </section>
         )}
