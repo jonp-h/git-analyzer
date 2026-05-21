@@ -13,6 +13,16 @@ export interface ConventionalCommitStats {
   types: Record<string, number>;
 }
 
+export interface MessageQualityStats {
+  avgLength: number;
+  tooShort: number;
+  good: number;
+  tooLong: number;
+  noisy: number;
+  hasBody: number;
+  hasBodyPercent: number;
+}
+
 export interface DailyActivity {
   date: string;
   count: number;
@@ -39,6 +49,7 @@ export interface AuthorStats {
   avgTimeBetweenCommitsHours: number;
   commitSizeBuckets: CommitSizeBuckets;
   conventionalCommits: ConventionalCommitStats;
+  messageQuality: MessageQualityStats;
   dailyActivity: DailyActivity[];
   weeklyCommits: WeeklyCommit[];
 }

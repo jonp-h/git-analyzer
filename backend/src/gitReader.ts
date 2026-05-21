@@ -18,6 +18,9 @@ const CONVENTIONAL_TYPE_RE =
 
 const BOUNDARY = "COMMITBOUNDARY";
 const CO_AUTHOR_RE = /^Co-authored-by:\s*(.+?)\s*<([^>]+)>\s*$/i;
+// Single-word / zero-information commit messages common in student repos
+const NOISY_MSG_RE =
+  /^(wip|temp|fix|add|edit|update|updates|change|changes|minor|stuff|ok|done|commit|asdf|todo|fixme|work in progress)\.?!?$/i;
 
 interface RawCommit {
   hash: string;
@@ -30,6 +33,7 @@ interface RawCommit {
   deletions: number;
   files: Array<{ path: string; insertions: number; deletions: number }>;
   coAuthors: Array<{ name: string; email: string }>;
+  hasBody: boolean;
 }
 
 function parseGitLog(raw: string): RawCommit[] {
@@ -52,6 +56,7 @@ function parseGitLog(raw: string): RawCommit[] {
     let deletions = 0;
     const files: RawCommit["files"] = [];
     const coAuthors: RawCommit["coAuthors"] = [];
+    let hasBody = false;
 
     // Scan all remaining lines: co-author trailers from %b, then numstat lines.
     // Body length is variable so we detect line type by content instead of index.
@@ -69,11 +74,17 @@ function parseGitLog(raw: string): RawCommit[] {
       }
 
       const parts = line.split("\t");
-      if (parts.length !== 3) continue;
+      if (parts.length !== 3) {
+        hasBody = true;
+        continue;
+      }
       if (parts[0] === "-" || parts[1] === "-") continue; // binary file
-
-      const ins = parseInt(parts[0], 10) || 0;
-      const del = parseInt(parts[1], 10) || 0;
+      const ins = parseInt(parts[0], 10);
+      const del = parseInt(parts[1], 10);
+      if (isNaN(ins) || isNaN(del)) {
+        hasBody = true;
+        continue;
+      }
       // Handle renames: "old.ts => new.ts" or "{old => new}/file.ts"
       let filePath = parts[2];
       if (filePath.includes("=>")) {
@@ -100,6 +111,7 @@ function parseGitLog(raw: string): RawCommit[] {
       deletions,
       files,
       coAuthors,
+      hasBody,
     });
   }
 
@@ -560,6 +572,12 @@ export async function getRepoStats(reposDir: string, repoName: string) {
     ccTotal: number;
     ccConforming: number;
     ccTypes: Record<string, number>;
+    msgShort: number;
+    msgGood: number;
+    msgLong: number;
+    msgNoisy: number;
+    msgBodyCount: number;
+    msgTotalLength: number;
   };
 
   const authorMap = new Map<string, AuthorEntry>();
@@ -584,6 +602,12 @@ export async function getRepoStats(reposDir: string, repoName: string) {
         ccTotal: 0,
         ccConforming: 0,
         ccTypes: {},
+        msgShort: 0,
+        msgGood: 0,
+        msgLong: 0,
+        msgNoisy: 0,
+        msgBodyCount: 0,
+        msgTotalLength: 0,
       });
     }
 
@@ -609,8 +633,13 @@ export async function getRepoStats(reposDir: string, repoName: string) {
         a.ccTypes[t] = (a.ccTypes[t] || 0) + 1;
       }
     }
-
-    // Credit co-authors with the same stats (full credit — mirrors GitHub's model)
+    const msgLen = c.message.length;
+    if (msgLen < 10) a.msgShort++;
+    else if (msgLen <= 72) a.msgGood++;
+    else a.msgLong++;
+    if (NOISY_MSG_RE.test(c.message)) a.msgNoisy++;
+    if (c.hasBody) a.msgBodyCount++;
+    a.msgTotalLength += msgLen;
     for (const co of c.coAuthors) {
       const coKey = co.email.toLowerCase();
       if (!authorMap.has(coKey)) {
@@ -630,6 +659,12 @@ export async function getRepoStats(reposDir: string, repoName: string) {
           ccTotal: 0,
           ccConforming: 0,
           ccTypes: {},
+          msgShort: 0,
+          msgGood: 0,
+          msgLong: 0,
+          msgNoisy: 0,
+          msgBodyCount: 0,
+          msgTotalLength: 0,
         });
       }
       const ca = authorMap.get(coKey)!;
@@ -651,6 +686,13 @@ export async function getRepoStats(reposDir: string, repoName: string) {
           ca.ccTypes[ct] = (ca.ccTypes[ct] || 0) + 1;
         }
       }
+      const caMsgLen = c.message.length;
+      if (caMsgLen < 10) ca.msgShort++;
+      else if (caMsgLen <= 72) ca.msgGood++;
+      else ca.msgLong++;
+      if (NOISY_MSG_RE.test(c.message)) ca.msgNoisy++;
+      if (c.hasBody) ca.msgBodyCount++;
+      ca.msgTotalLength += caMsgLen;
     }
   }
 
@@ -705,6 +747,16 @@ export async function getRepoStats(reposDir: string, repoName: string) {
         percent:
           a.ccTotal > 0 ? Math.round((a.ccConforming / a.ccTotal) * 100) : 0,
         types: a.ccTypes,
+      },
+      messageQuality: {
+        avgLength: a.ccTotal > 0 ? Math.round(a.msgTotalLength / a.ccTotal) : 0,
+        tooShort: a.msgShort,
+        good: a.msgGood,
+        tooLong: a.msgLong,
+        noisy: a.msgNoisy,
+        hasBody: a.msgBodyCount,
+        hasBodyPercent:
+          a.ccTotal > 0 ? Math.round((a.msgBodyCount / a.ccTotal) * 100) : 0,
       },
       dailyActivity,
       weeklyCommits,
